@@ -1,28 +1,19 @@
 import pandas as pd
 from pathlib import Path
+#this library is used to get the transcript of a video 
 from youtube_transcript_api import YouTubeTranscriptApi
 
-# ----------------------------
-# Config
-# ----------------------------
 INPUT_CSV = Path("15.LexiChat/videos.csv")
 OUTPUT_CSV = Path("15.LexiChat/video_with_meta_data_and_transcript.csv")
 
 ytt_api = YouTubeTranscriptApi()
-
-# ----------------------------
-# Load input video metadata
-# ----------------------------
 df_videos = pd.read_csv(INPUT_CSV)
 
-# Basic input hygiene
+
 df_videos = df_videos.dropna(subset=["video_id"])
 df_videos["video_id"] = df_videos["video_id"].astype(str)
 df_videos = df_videos.drop_duplicates(subset=["video_id"])
 
-# ----------------------------
-# Load existing transcripts (if any)
-# ----------------------------
 if OUTPUT_CSV.exists():
     df_existing = pd.read_csv(OUTPUT_CSV)
     processed_video_ids = set(df_existing["video_id"].astype(str).unique())
@@ -34,13 +25,9 @@ else:
 
 rows = []
 
-# ----------------------------
-# Fetch transcripts incrementally
-# ----------------------------
 for _, row in df_videos.iterrows():
     video_id = row["video_id"]
 
-    # Guard: skip invalid video_id
     if not isinstance(video_id, str) or not video_id.strip():
         print("Skipping row with invalid video_id")
         continue
@@ -76,9 +63,6 @@ for _, row in df_videos.iterrows():
             "duration": snippet.duration
         })
 
-# ----------------------------
-# Save (append-safe)
-# ----------------------------
 if rows:
     df_new = pd.DataFrame(rows)
 
