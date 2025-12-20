@@ -1,22 +1,34 @@
+#Here we use a hybrid retrieval logic to retrieve relevant context as per the user query
+#for retrieving we use BM25 Retriever,MultiQuery Retriever ,MMR Retriever
+
+#bm25 retriever retrievers on the basis of keywords
+
+#multiquery retrievers helps in the case where the user query is ambigious
+#it uses an llm and the user query and ask the llm to generate possible questions from the user #query and for all the questions llm generates it retrieves the context
+
+#here for multi query retriever we have use the gemini-2.5-flash model and for generating
+#the final answer we have used openi/gpt-oss-120B model available on Groq
+
+#mmr retriever or Maximal Marginal relevance retriever is used to get results which are relevant 
+# to the user query and also diverse in nature this prevents the llm to generate duplicate answers 
+#there may be a case when llm might give a same answer twice this prevents us from that 
+#(Relevant+Diverse)
+
 from langchain_chroma import Chroma
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
+
 from langchain_community.retrievers import BM25Retriever
 from langchain.retrievers.multi_query import MultiQueryRetriever
+
 from langchain.prompts import PromptTemplate
+
 from langchain_groq import ChatGroq
 from langchain.schema import Document
 from dotenv import load_dotenv
-import os
-
 load_dotenv()
 
-# ============================================================
-# EMBEDDINGS + VECTOR STORE
-# ============================================================
 
-embedder = GoogleGenerativeAIEmbeddings(
-    model="models/text-embedding-004"
-)
+embedder = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
 
 vector_store = Chroma(
     collection_name="lexi_transcripts",
@@ -24,38 +36,40 @@ vector_store = Chroma(
     embedding_function=embedder,
 )
 
-# ============================================================
-# RETRIEVERS
-# ============================================================
 
-# --- MMR Retriever ---
+#fetch k - fetches the top20 most similar chunks
+#k- from the chunks fetched above select the best 6
 mmr_retriever = vector_store.as_retriever(
     search_type="mmr",
     search_kwargs={"k": 6, "fetch_k": 20},
 )
 
-# --- Multi-Query Retriever (Gemini) ---
+
 mq_llm = ChatGoogleGenerativeAI(model="models/gemini-2.5-flash")
 
+
+#for all the questions llm generates from the query it fetches the top 6 relevant chunks 
+# and then finally all the retrieved chunks are combined and duplicated documents are removed 
 multi_retriever = MultiQueryRetriever.from_llm(
     retriever=vector_store.as_retriever(search_kwargs={"k": 6}),
     llm=mq_llm,
 )
 
-# --- BM25 Retriever ---
+#bm25 used for keyword search and retrieves the content where there are keyword matches
+#here we have kept k=6 
 docs = vector_store._collection.get(include=["documents", "metadatas"])
 all_docs = [
     Document(page_content=text, metadata=meta)
     for text, meta in zip(docs["documents"], docs["metadatas"])
 ]
-
 bm25 = BM25Retriever.from_documents(all_docs)
 bm25.k = 6
 
-# ============================================================
-# HYBRID RETRIEVAL
-# ============================================================
 
+#retrieved list contains list of all 3 retrievers
+#and then we loop over documents retrieved by each retriever
+#we use hash to remove any duplicated results
+#and finally returns all the list of unique Document objects
 def combine_results(*retrieved_lists):
     seen = set()
     unique_docs = []
@@ -76,12 +90,11 @@ def hybrid_retrieve(query):
     r3 = bm25.invoke(query)
 
     combined = combine_results(r1, r2, r3)
-    return combined[:10]  # slightly higher recall for ranking
+    return combined[:20]  #we finally return the top 20 documents 
 
-# ============================================================
-# STRUCTURED CONTEXT
-# ============================================================
 
+#here since the retrieved context is in the form of document object we make this into a structured format in the form of list of dictionary which we can then pass into the llm 
+#and remove the unnecessary metadata as it is not needed
 def format_docs_structured(docs):
     structured = []
     for i, d in enumerate(docs):
@@ -93,6 +106,11 @@ def format_docs_structured(docs):
         })
     return structured
 
+#here we take the structured_docs and convert the timestamps into mm:ss 
+#so the prompt is like 
+# Chunk 3:
+# Text: 
+# Timestamp: [12:45]
 
 def docs_to_prompt_context(structured_docs):
     blocks = []
@@ -101,19 +119,15 @@ def docs_to_prompt_context(structured_docs):
         ss = d["timestamp"] % 60
         ts = f"{mm:02d}:{ss:02d}"
 
-        blocks.append(
-            f"""
-Chunk {d['id']}:
-Text: {d['text']}
-Timestamp: [{ts}]({d['url']})
-"""
-        )
+        blocks.append(f"""Chunk {d['id']}:Text: {d['text']}Timestamp: [{ts}]({d['url']})""")
     return "\n".join(blocks)
 
-# ============================================================
-# PROMPT (TOP-3 ANSWERS)
-# ============================================================
 
+
+
+#here we use the prompt template class so insert the chunks, questions dynamically into the prompt
+#we strictly force the llm to answer only from the context and not from its own knowledge and not hallucinate 
+#we also tell the model to generate clickable timestamps for every answer it generates 
 rank_prompt = PromptTemplate.from_template(
 """
 You must answer ONLY using the context chunks below.
@@ -151,41 +165,24 @@ If an answer is shorter than two full sentences, REWRITE it to meet the rules.
 )
 
 
-# ============================================================
-# LLM
-# ============================================================
+# temperature is kept to zero so has to have reproducibilty in the answers
+llm = ChatGroq(model="openai/gpt-oss-120b",temperature=0)
 
-llm = ChatGroq(
-    model="openai/gpt-oss-120b",
-    temperature=0,
-)
 
-# ============================================================
-# PUBLIC API (STREAMLIT + EVALUATION)
-# ============================================================
+#this function is finally used to run the complete retrieval pipeline
+# and it returns the final answer and retrieved context which will be needed while evaluating the RAG System
+
 
 def ask(question: str):
-    """
-    Returns:
-    {
-        "answer": str,
-        "retrieved_contexts": list[str]
-    }
-    """
-
+    
     docs = hybrid_retrieve(question)
     structured_docs = format_docs_structured(docs)
     prompt_context = docs_to_prompt_context(structured_docs)
 
-    response = llm.invoke(
-        rank_prompt.format(
-            context=prompt_context,
-            question=question
-        )
-    ).content
+    final_prompt=rank_prompt.format(context=prompt_context,question=question)
+    response = llm.invoke(final_prompt).content
 
     return {
         "answer": response,
         "retrieved_contexts": [d["text"] for d in structured_docs],
     }
-print(ask("what is geopolitics")['answer'])
