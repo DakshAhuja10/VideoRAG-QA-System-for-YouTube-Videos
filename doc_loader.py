@@ -9,9 +9,7 @@ from langchain.schema import Document
 
 #we take the csv file as input and then compute the hash of the text column for every row 
 #this allows us to detect duplicate content and prevents us from generating their embedding #repeatedly thereby save us cost by preventing us from making unnecessarily to google gemini api #for embeddings 
-
 #this class returns a list of document object with each document object contianing page content as #text and all the remaining columns as meta data
-
 #if a text is repeated multiple times still we create a document object simply because start and #end duration of those columns cannot be same
 
 
