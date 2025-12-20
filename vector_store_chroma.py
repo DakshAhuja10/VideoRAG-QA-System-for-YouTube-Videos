@@ -38,8 +38,8 @@ def build_vector_store():
             include=["metadatas", "documents", "embeddings"]
     )
 
-    #here everytime we create new embedding we see how many new embeddings do we need to had
-    #how many we need to skip and how many can be resued.
+    #here everytime we create new embedding we see how many new embeddings do we need to have 
+    #how many we need to skip and how many can be reused.
     added = 0
     skipped = 0
     reused = 0
