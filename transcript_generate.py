@@ -7,13 +7,14 @@ INPUT_CSV = Path("15.LexiChat/videos.csv")
 OUTPUT_CSV = Path("15.LexiChat/video_with_meta_data_and_transcript.csv")
 
 ytt_api = YouTubeTranscriptApi()
+
+#here i am reading the csv file at the path and then dropping the rows where video id is null or duplicated rows 
 df_videos = pd.read_csv(INPUT_CSV)
-
-
 df_videos = df_videos.dropna(subset=["video_id"])
 df_videos["video_id"] = df_videos["video_id"].astype(str)
 df_videos = df_videos.drop_duplicates(subset=["video_id"])
 
+#the videos which we have already processed so no need to extract their transcripts again
 if OUTPUT_CSV.exists():
     df_existing = pd.read_csv(OUTPUT_CSV)
     processed_video_ids = set(df_existing["video_id"].astype(str).unique())
@@ -49,7 +50,8 @@ for _, row in df_videos.iterrows():
     except Exception as e:
         print(f"Error fetching transcript for {video_id}: {e}")
         continue
-
+# transcript we fetch is of the form transcript line ,start time , end time 
+# so here we merge the meta data we already have with the transcript,start time and end time
     for snippet in transcript:
         rows.append({
             "video_id": video_id,
@@ -76,4 +78,3 @@ if rows:
 else:
     print("No new transcripts to add.")
 
-print("Done!")
