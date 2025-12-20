@@ -1,7 +1,10 @@
-# ============================================================
-# evaluation_pipeline.py
-# ============================================================
-
+#This file contains the code which is used evaluate our RAG system
+#We evaluate our RAG System on the following 4 parameters-
+        # 1.Context Precision : How noisy the retrieved context was
+        # 2.Context Recall : Did retrieval cover most needed info
+        # 3.Faithfulness : Did the answer stick to the provided context
+        # 4.Answer Relevancy : Did the model actually answer the question
+#for evaluating a rag on above parameters we need question,answer,context and ground truth
 import os
 import re
 import json
@@ -17,53 +20,41 @@ from ragas.metrics import (
     answer_relevancy,
     faithfulness,
 )
-from ragas.prompt import PydanticPrompt
+
 
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_groq import ChatGroq
 
-# ------------------------------------------------------------
-# CONFIG
-# ------------------------------------------------------------
+from ragas.prompt import PydanticPrompt
 PydanticPrompt.default_n = 1
 
+#Path Where log file is stored/should be created
 LOG_FILE = "logs/rag_evaluation_log.csv"
 os.makedirs("logs", exist_ok=True)
 
-# ------------------------------------------------------------
-# LLM + EMBEDDINGS (ONLY FOR EVALUATION)
-# ------------------------------------------------------------
-embedding_model = GoogleGenerativeAIEmbeddings(
-    model="models/text-embedding-004"
-)
 
-llm = ChatGroq(
-    model="openai/gpt-oss-120b",
-    temperature=0,
-)
+embedding_model = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
 
-# ------------------------------------------------------------
-# HELPERS
-# ------------------------------------------------------------
+llm = ChatGroq(model="openai/gpt-oss-120b",temperature=0)
+
+
 def extract_json(text: str):
     match = re.search(r"\{.*?\}", text, re.DOTALL)
     if not match:
         raise ValueError("No JSON found")
     return json.loads(match.group())
 
-
+#returns the confidence score and we focused mainly on did answer stick to the context or not??
 def compute_confidence(row):
-    """
-    Single scalar confidence score
-    """
     return (
-        0.40 * row["answer_relevancy"]
-        + 0.30 * row["faithfulness"]
+        0.30 * row["answer_relevancy"]
+        + 0.40 * row["faithfulness"]
         + 0.20 * row["context_recall"]
         + 0.10 * row["context_precision"]
     )
 
 
+#to write the into log file
 def log_evaluation(question, answer, reference, scores, confidence):
     write_header = not os.path.exists(LOG_FILE)
 
@@ -86,9 +77,7 @@ def log_evaluation(question, answer, reference, scores, confidence):
         writer.writerow(row)
 
 
-# ------------------------------------------------------------
-# REFERENCE ANSWER (GROUND TRUTH)
-# ------------------------------------------------------------
+
 REFERENCE_PROMPT = """
 Answer the question using ONLY the context.
 If the answer is not explicitly present, say "I don't know".
@@ -105,14 +94,10 @@ Question:
 {question}
 """
 
-
+#here we are using the llm to generate the reference answer or the ground truth
 def generate_reference_answer(question, context):
-    response = llm.invoke(
-        REFERENCE_PROMPT.format(
-            question=question,
-            context=context
-        )
-    ).content
+    ground_truth_prompt=REFERENCE_PROMPT.format(question=question,context=context)
+    response = llm.invoke(ground_truth_prompt).content
 
     try:
         return extract_json(response)["answer"]
@@ -120,20 +105,10 @@ def generate_reference_answer(question, context):
         return "I don't know"
 
 
-# ------------------------------------------------------------
-# MAIN EVALUATION FUNCTION
-# ------------------------------------------------------------
+
 def evaluate_answer(question, rag_answer, retrieved_contexts):
-    """
-    Inputs come FROM retriever_pipeline2.ask()
-    """
-
     formatted_context = "\n".join(retrieved_contexts)
-
-    reference = generate_reference_answer(
-        question,
-        formatted_context
-    )
+    reference = generate_reference_answer(question,formatted_context)
 
     dataset = Dataset.from_pandas(pd.DataFrame([{
         "user_input": question,
@@ -142,6 +117,8 @@ def evaluate_answer(question, rag_answer, retrieved_contexts):
         "reference": reference,
     }]))
 
+    
+    # ragas framwork to calculate the values of all ragas parameters
     results = evaluate(
         dataset,
         metrics=[
@@ -167,7 +144,7 @@ def evaluate_answer(question, rag_answer, retrieved_contexts):
 
     confidence = compute_confidence(numeric_scores)
 
-    # Auto-log low confidence or "I don't know"
+    # It automatically logs all low scores
     if confidence < 0.6 or "I don't know" in rag_answer:
         log_evaluation(
             question,
