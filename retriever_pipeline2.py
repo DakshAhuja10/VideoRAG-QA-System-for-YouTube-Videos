@@ -58,12 +58,20 @@ multi_retriever = MultiQueryRetriever.from_llm(
 #bm25 used for keyword search and retrieves the content where there are keyword matches
 #here we have kept k=6 
 docs = vector_store._collection.get(include=["documents", "metadatas"])
-all_docs = [
-    Document(page_content=text, metadata=meta)
-    for text, meta in zip(docs["documents"], docs["metadatas"])
-]
-bm25 = BM25Retriever.from_documents(all_docs)
-bm25.k = 6
+
+all_docs = []
+if docs and docs.get("documents"):
+    all_docs = [
+        Document(page_content=text, metadata=meta)
+        for text, meta in zip(docs["documents"], docs["metadatas"])
+    ]
+
+if all_docs:
+    bm25 = BM25Retriever.from_documents(all_docs)
+    bm25.k = 6
+else:
+    bm25 = None
+
 
 
 #retrieved list contains list of all 3 retrievers
