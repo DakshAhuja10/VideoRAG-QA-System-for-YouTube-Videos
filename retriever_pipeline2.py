@@ -95,10 +95,16 @@ def combine_results(*retrieved_lists):
 def hybrid_retrieve(query):
     r1 = mmr_retriever.invoke(query)
     r2 = multi_retriever.invoke(query)
-    r3 = bm25.invoke(query)
 
-    combined = combine_results(r1, r2, r3)
-    return combined[:20]  #we finally return the top 20 documents 
+    results = [r1, r2]
+
+    if bm25:
+        r3 = bm25.invoke(query)
+        results.append(r3)
+
+    combined = combine_results(*results)
+    return combined[:20]
+  #we finally return the top 20 documents 
 
 
 #here since the retrieved context is in the form of document object we make this into a structured format in the form of list of dictionary which we can then pass into the llm 
