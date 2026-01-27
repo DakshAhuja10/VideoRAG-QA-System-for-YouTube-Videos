@@ -256,18 +256,4 @@ Low-confidence answers are automatically logged for inspection and improvement.
 
 ---
 
-## 👤 Author
 
-**Daksh Ahuja**
-Computer Science Undergraduate | AI/ML & Systems Enthusiast
-
----
-
-If you want, next I can:
-
-* Shorten this for **resume bullets**
-* Add **architecture diagrams**
-* Optimize README for **GitHub stars / recruiters**
-* Convert this into a **project blog / case study**
-
-Just tell me 😄
