@@ -9,7 +9,8 @@ from doc_loader import Csv_Loader
 from dotenv import load_dotenv
 load_dotenv()
 
-PERSIST_PATH = "15.LexiChat/chroma_db" # where chroma db is stored
+# PERSIST_PATH = "15.LexiChat/chroma_db" # where chroma db is stored locally
+PERSIST_PATH = "chroma_db" # on cloud
 CSV_PATH = "15.LexiChat/video_with_meta_data_and_transcript.csv" #meta data along with transcripts
 
 

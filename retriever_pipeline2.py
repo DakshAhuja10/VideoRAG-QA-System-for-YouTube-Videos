@@ -32,7 +32,8 @@ embedder = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
 
 vector_store = Chroma(
     collection_name="lexi_transcripts",
-    persist_directory="15.LexiChat/chroma_db",
+    persist_directory="chroma_db", # on cloud
+    # persist_directory="15.LexiChat/chroma_db", #locally at this path
     embedding_function=embedder,
 )
 
