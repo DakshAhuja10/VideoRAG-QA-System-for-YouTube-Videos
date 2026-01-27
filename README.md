@@ -1,8 +1,3 @@
-Awesome — here’s a **complete, polished GitHub README** for your project.
-It’s written to be **clear, professional, and recruiter-friendly**, while also highlighting the **design decisions** and **technical depth** of your VideoRAG system.
-
----
-
 # 🎥 VideoRAG: Question Answering over YouTube Video Transcripts
 
 VideoRAG is an **end-to-end Retrieval-Augmented Generation (RAG) system** that enables **grounded, timestamped question answering over YouTube videos**.
@@ -68,6 +63,38 @@ The system also includes a **Streamlit frontend** with confidence tracking, retr
   * Evaluation history dashboard
 
 ---
+
+## 🖥️ Streamlit Interface Walkthrough
+
+Below is the end-to-end Streamlit interface for **VideoRAG**, demonstrating question answering, automatic RAG evaluation, and evaluation history tracking.
+
+### 1️⃣ Question Answering over YouTube Transcripts
+Users ask questions over video transcripts.  
+The system retrieves relevant context, generates grounded answers, and provides clickable timestamps.
+
+<p align="center">
+  <img src="assets/UI-1.png" width="900"/>
+</p>
+
+---
+
+### 2️⃣ Automatic RAG Evaluation (RAGAS)
+Each answer is automatically evaluated using **RAGAS** on context precision, context recall, faithfulness, and answer relevancy.  
+A confidence score is computed to assess answer reliability.
+
+<p align="center">
+  <img src="assets/UI-2.png" width="900"/>
+</p>
+
+---
+
+### 3️⃣ Evaluation History & Monitoring
+Low-confidence answers are logged and visualized over time, enabling continuous monitoring and debugging of the RAG system.
+
+<p align="center">
+  <img src="assets/UI-3.png" width="900"/>
+</p>
+
 
 ## 🧠 System Architecture
 
@@ -218,7 +245,7 @@ Low-confidence answers are automatically logged for inspection and improvement.
 
 ---
 
-## 🎯 Design Decisions (Why This Matters)
+## 🎯 Design Decisions
 
 * **No Text Splitter**
   Transcripts are already timestamped line-by-line. Further splitting would break temporal grounding.
