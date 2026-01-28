@@ -1,10 +1,11 @@
-
 import streamlit as st
 import logging
 import os
 import pandas as pd
 import time
 import re
+import threading
+
 
 from retriever_pipeline2 import ask
 from evaluation_pipeline import evaluate_answer
@@ -57,6 +58,18 @@ for k, v in default_state.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
+def run_evaluation_async(result_container, question, rag_answer, contexts):
+    try:
+        result_container["output"] = evaluate_answer(
+            question=question,
+            rag_answer=rag_answer,
+            retrieved_contexts=contexts
+        )
+    except Exception as e:
+        result_container["error"] = str(e)
+
+
+
 #Sidebar
 page = st.sidebar.radio("Navigation",["Ask a Question", "📊 Evaluation History"])
 
@@ -67,7 +80,7 @@ if page == "Ask a Question":
     st.subheader("Question Answering over YouTube Transcripts")
     st.markdown(
         "Ask questions over video transcripts. "
-        "Answers are streamed and then evaluated."
+        "Answers are streamed and then evaluated.Before Asking a Question Go Through the Readme file to know which all questions you can ask."
     )
     st.divider()
 
@@ -125,12 +138,47 @@ if page == "Ask a Question":
         st.session_state.stream_done = True
 
         # evaluate we call the evaluate_answer funtion in evaluate_pipeline.py
-        with st.spinner("Evaluating answer quality..."):
-            st.session_state.eval_out = evaluate_answer(
-                question=st.session_state.question,
-                rag_answer=st.session_state.rag_answer,
-                retrieved_contexts=st.session_state.contexts
-            )
+        # with st.spinner("Evaluating answer quality..."):
+        #     st.session_state.eval_out = evaluate_answer(
+        #         question=st.session_state.question,
+        #         rag_answer=st.session_state.rag_answer,
+        #         retrieved_contexts=st.session_state.contexts
+        #     )
+        
+        progress_bar = st.progress(0)
+        status = st.empty()
+        
+        result_container = {}
+        question = st.session_state.question
+        rag_answer = st.session_state.rag_answer
+        contexts = st.session_state.contexts
+        
+        eval_thread = threading.Thread(
+            target=run_evaluation_async,
+            args=(result_container,question,rag_answer,contexts)
+        )
+        
+        eval_thread.start()
+        start_time = time.time()
+        MAX_WAIT = 180  # 3 minutes expected
+        
+        while eval_thread.is_alive():
+                elapsed = time.time() - start_time
+                progress = min(elapsed / MAX_WAIT, 0.95)  # cap at 95%
+                progress_bar.progress(progress)
+                status.text(f"Evaluating answer quality(this may take 2–3 minutes)… {int(progress*100)}%")
+                time.sleep(1)
+
+        eval_thread.join()
+
+        progress_bar.progress(1.0)
+        status.text("✅ Evaluation complete")
+
+        st.session_state.eval_out = result_container["output"]
+        time.sleep(0.5)
+        progress_bar.empty()
+        status.empty()
+
 
         st.session_state.original_confidence = st.session_state.eval_out["confidence"]
 
