@@ -36,7 +36,7 @@ os.makedirs("logs", exist_ok=True)
 
 embedding_model=HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
-llm = ChatGroq(model="openai/gpt-oss-120b",temperature=0)
+llm = ChatGroq(model="llama-3.1-8b-instant",temperature=0)
 
 
 def extract_json(text: str):

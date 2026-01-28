@@ -182,7 +182,7 @@ If an answer is shorter than two full sentences, REWRITE it to meet the rules.
 
 
 # temperature is kept to zero so has to have reproducibilty in the answers
-llm = ChatGroq(model="openai/gpt-oss-120b",temperature=0)
+llm = ChatGroq(model="llama-3.1-8b-instant",temperature=0)
 
 
 #this function is finally used to run the complete retrieval pipeline
