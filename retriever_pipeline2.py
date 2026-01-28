@@ -16,6 +16,7 @@
 
 from langchain_chroma import Chroma
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
+from langchain_huggingface import HuggingFaceEmbeddings
 
 from langchain_community.retrievers import BM25Retriever
 from langchain.retrievers.multi_query import MultiQueryRetriever
@@ -28,7 +29,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-embedder = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
+embedder = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
 vector_store = Chroma(
     collection_name="lexi_transcripts",

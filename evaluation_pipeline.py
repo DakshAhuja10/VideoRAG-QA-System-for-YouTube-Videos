@@ -23,6 +23,7 @@ from ragas.metrics import (
 
 
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_groq import ChatGroq
 
 from ragas.prompt import PydanticPrompt
@@ -33,7 +34,7 @@ LOG_FILE = "logs/rag_evaluation_log.csv"
 os.makedirs("logs", exist_ok=True)
 
 
-embedding_model = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
+embedding_model=HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
 llm = ChatGroq(model="openai/gpt-oss-120b",temperature=0)
 

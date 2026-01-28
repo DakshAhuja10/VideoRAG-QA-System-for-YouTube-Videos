@@ -1,7 +1,7 @@
 #use chromadb or any other vector store  which has the ability to persist
 #we cannot use FAISS because it does not have the ability of persistence
 from langchain_chroma import Chroma
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from tqdm import tqdm  #to get the status bar while we are creating embedding
 import uuid
 
@@ -21,7 +21,8 @@ def build_vector_store():
     print("Loading completed.")
 
     
-    embedder = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
+    embedder = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+
     
     vector_store = Chroma(
         embedding_function=embedder,

@@ -143,7 +143,7 @@ if page == "Ask a Question":
 
         if confidence >= 0.75:
             st.success(f"High confidence: {confidence:.3f}")
-        elif confidence >= 0.5:
+        elif confidence >= 0.45:
             st.warning(f"Medium confidence: {confidence:.3f}")
         else:
             st.error(f"Low confidence: {confidence:.3f}")

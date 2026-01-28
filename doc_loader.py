@@ -5,7 +5,7 @@
 
 import pandas as pd
 from hashlib import sha256
-from langchain.schema import Document
+from langchain_core.documents import Document
 
 #we take the csv file as input and then compute the hash of the text column for every row 
 #this allows us to detect duplicate content and prevents us from generating their embedding #repeatedly thereby save us cost by preventing us from making unnecessarily to google gemini api #for embeddings 

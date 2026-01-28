@@ -5,6 +5,75 @@ It ingests YouTube playlists, extracts transcripts with metadata, builds a **per
 
 The system also includes a **Streamlit frontend** with confidence tracking, retry mechanisms, and evaluation history for continuous improvement.
 
+## ⚠️ Important Usage Note (Read Before Asking Questions)
+
+This application is a **content-grounded VideoRAG system**, not a general-purpose chatbot.
+
+### 📌 What content is indexed?
+Embeddings have been created **only for transcripts from a limited set of YouTube videos (currently 12 videos)**.  
+The system can answer questions **only if the information exists explicitly in these transcripts**.
+
+If you ask a question **outside the scope of this content**, the system will intentionally respond with:
+
+> **“I don’t know. The transcripts do not contain the answer.”**
+
+This behavior is **by design** to prevent hallucinations and ensure faithful, grounded answers.
+
+---
+
+### 🎥 Indexed YouTube Videos
+
+Please ask questions **only related to the following videos** to get relevant and high-confidence answers:
+
+- https://www.youtube.com/watch?v=wKw1tpN7NVE  
+- https://www.youtube.com/watch?v=_ySbzVXiwzQ  
+- https://www.youtube.com/watch?v=pXEl0R1BX-g  
+- https://www.youtube.com/watch?v=KceRmxCnXDA  
+- https://www.youtube.com/watch?v=l5Uw8qG7vZU  
+- https://www.youtube.com/watch?v=GFB0o1QQyLw  
+- https://www.youtube.com/watch?v=wuJa1lnv_TQ  
+- https://www.youtube.com/watch?v=0VH1Lim8gL8  
+- https://www.youtube.com/watch?v=O5xeyoRL95U  
+- https://www.youtube.com/watch?v=EUowNpYL120  
+- https://www.youtube.com/watch?v=tXgtV_P87ZE  
+- https://www.youtube.com/watch?v=w7mTuL1hfzA  
+
+---
+
+### 💡 Recommended Questions to Try
+
+To see VideoRAG perform at its best, try asking **questions that are explicitly discussed in the indexed videos** listed above.
+
+**🎓 Concepts & Explanations**
+- What possibilities of deep learning does the speaker say it can bring to the world?
+- What does the speaker say about learning representations from data?  
+- How are neural networks explained in the context of real-world problems?
+
+**🧠 Philosophy & Thinking**
+- What is said about discipline and consistency in learning or research?  
+- How does the speaker approach long-term thinking and progress?  
+- What mindset is recommended for mastering difficult technical subjects?
+
+**🛠️ Practical Advice**
+- What advice is given for beginners entering machine learning or AI?  
+- How does the speaker suggest dealing with failure or confusion while learning?  
+- What role does practice play according to the speaker?
+
+**🔍 Reflections & Insights**
+- What does the speaker say about the future of AI or machine learning?  
+- How is problem-solving framed in the context of complex systems?  
+- What habits or routines are emphasized for sustained improvement?
+
+---
+
+### ⚠️ Reminder
+If you ask questions **outside the scope of the indexed videos**, the system will intentionally respond with:
+
+> **“I don’t know. The transcripts do not contain the answer.”**
+
+This indicates that the system is **avoiding hallucination by answering only from verified transcript context**.
+
+
 ---
 
 ## 🚀 Key Features
@@ -95,6 +164,23 @@ Low-confidence answers are logged and visualized over time, enabling continuous 
   <img src="assets/UI-3.png" width="900"/>
 </p>
 
+---
+
+### 4️⃣ Retry, Confidence Improvement & Answer Comparison
+
+When an answer receives a low confidence score, users can **retry the same question**.  
+Retry triggers a fresh retrieval pass, often surfacing more explicit or better-grounded context.
+
+The interface highlights:
+- **Confidence improvement** after retry
+- **Side-by-side comparison** of the original vs retried answer
+- **Updated RAGAS evaluation metrics** reflecting improved grounding
+
+This makes retrieval instability transparent and demonstrates how improved context directly impacts answer faithfulness and confidence.
+
+<p align="center">
+  <img src="assets/UI-4.png" width="900"/>
+</p>
 
 ## 🧠 System Architecture
 
