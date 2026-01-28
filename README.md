@@ -5,6 +5,18 @@ It ingests YouTube playlists, extracts transcripts with metadata, builds a **per
 
 The system also includes a **Streamlit frontend** with confidence tracking, retry mechanisms, and evaluation history for continuous improvement.
 
+## 🔗 Live Demo (Streamlit App)
+
+You can try the deployed **VideoRAG** application here:
+
+👉 **https://videorag-app-system-for-youtube-videos-3vpsxvnappai2vxtpjgon3.streamlit.app/**
+
+> ⚠️ **Note:** This is a demo deployment on **Streamlit Cloud**.  
+> Answer evaluation can take longer (≈2–2.5 minutes) because it triggers **multiple sequential LLM calls** for RAG quality metrics and runs on **shared, rate-limited cloud infrastructure**.  
+> See the *Evaluation Latency* section below for details.
+
+
+
 ## ⚠️ Important Usage Note (Read Before Asking Questions)
 
 This application is a **content-grounded VideoRAG system**, not a general-purpose chatbot.
@@ -256,6 +268,7 @@ Streamlit Frontend + Logs
 │   └── rag_evaluation_log.csv
 ├── chroma_db/
 └── README.md
+└── assets
 ```
 
 ---
@@ -330,6 +343,32 @@ A **custom confidence score** is computed with higher weight on faithfulness to 
 Low-confidence answers are automatically logged for inspection and improvement.
 
 ---
+
+### ⏱️ Evaluation Latency on Streamlit Cloud
+
+Automatic answer evaluation uses **multiple LLM calls** (via RAGAS) to assess:
+- Faithfulness
+- Answer relevancy
+- Context grounding quality
+
+Because this app is deployed on **Streamlit Cloud (shared infrastructure)**, evaluation may take:
+
+> ⏳ **~2–2.5 minutes per evaluation**
+
+This latency is expected and caused by:
+- Multiple sequential LLM calls per metric
+- Rate limits on hosted LLM providers
+- Cold starts on shared cloud resources
+
+⚠️ **Important:**  
+This does **not** affect answer generation speed.  
+Only the **evaluation phase** is slow.
+
+In a production or self-hosted environment, evaluation latency can be reduced significantly by:
+- Using smaller evaluation models
+- Running evaluation asynchronously
+- Moving evaluation to offline or batch pipelines
+
 
 ## 🎯 Design Decisions
 
