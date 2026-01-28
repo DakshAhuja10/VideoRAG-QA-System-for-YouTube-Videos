@@ -102,7 +102,7 @@ def generate_reference_answer(question, context):
 
     try:
         return extract_json(response)["answer"]
-    except:
+    except Exception as e:
         return "I don't know"
 
 
@@ -138,8 +138,8 @@ def evaluate_answer(question, rag_answer, retrieved_contexts):
                 "context_recall",
                 "answer_relevancy",
                 "faithfulness",
-            ]].astype(float)
-
+            ]]
+    numeric_scores = pd.to_numeric(numeric_scores, errors="coerce").fillna(0.0)
     final_score_mean = numeric_scores.mean()
 
 
