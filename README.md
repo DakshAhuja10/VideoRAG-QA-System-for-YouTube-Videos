@@ -58,6 +58,7 @@ To see VideoRAG perform at its best, try asking **questions that are explicitly 
 
 **🎓 Concepts & Explanations**
 - What possibilities of deep learning does the speaker say it can bring to the world?
+- What is geopolitics?
 - What does the speaker say about learning representations from data?  
 - How are neural networks explained in the context of real-world problems?
 
