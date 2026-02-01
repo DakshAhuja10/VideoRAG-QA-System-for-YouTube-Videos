@@ -20,6 +20,7 @@ venv/
 test.ipynb
 retriever_pipeline1.py
 interview_questions_and_answers.txt
+piper_voices_output/
 
 # ======================
 # OS / Editor

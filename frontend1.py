@@ -5,6 +5,8 @@ import pandas as pd
 import time
 import re
 import threading
+import subprocess
+from pathlib import Path
 
 
 from retriever_pipeline2 import ask
@@ -36,6 +38,60 @@ logger = logging.getLogger(__name__)
 st.set_page_config(page_title="VideoRAG",page_icon="🎥",layout="wide")
 
 
+# Check if running on Streamlit Cloud
+IS_STREAMLIT_CLOUD = os.environ.get("STREAMLIT_RUNTIME_ENV") == "cloud" or \
+                     os.environ.get("HOSTNAME", "").startswith("streamlit-") or \
+                     "streamlit.io" in os.environ.get("HOME", "")
+
+if IS_STREAMLIT_CLOUD:
+    logger.info("Running on Streamlit Cloud - using gTTS")
+    USE_GTTS = True
+else:
+    logger.info("Running locally - using Piper")
+    USE_GTTS = False
+    PIPER_EXE = r"D:\piper\piper.exe"
+    PIPER_VOICE = r"D:\piper\en_US-lessac-medium.onnx"
+
+
+def generate_voice_mp3(text: str, out_mp3: str):
+    """
+    Generate MP3 voice from text Uses gTTS on Streamlit Cloud, Piper locally
+    """
+    if USE_GTTS:
+        # Cloud: Use gTTS
+        try:
+            from gtts import gTTS
+            tts = gTTS(text=text, lang='en', slow=False)
+            tts.save(out_mp3)
+            logger.info("Audio generated using gTTS")
+        except ImportError:
+            logger.error("gTTS not installed. Install with: pip install gtts")
+            raise
+    else:
+        # Local: Use Piper + FFmpeg
+        wav_path = Path("temp_voice.wav")
+
+        # Run Piper (stdin → wav)
+        subprocess.run(
+            [PIPER_EXE, "-m", PIPER_VOICE, "-f", str(wav_path)],
+            input=text.encode("utf-8"),
+            check=True
+        )
+
+        # Convert WAV → MP3
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", str(wav_path), "-ab", "192k", out_mp3],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True
+        )
+
+        if wav_path.exists():
+            wav_path.unlink()
+        
+        logger.info("Audio generated using Piper")
+
+
 def split_answers(answer_text: str):
     pattern = r"\n(?=\d+\.\s)"
     return [a.strip() for a in re.split(pattern, answer_text.strip()) if a.strip()]
@@ -48,10 +104,17 @@ default_state = {
     "contexts": None,
     "eval_out": None,
     "stream_done": False,
-    "rendered_answer": "",
+    "answer_placeholder_content": "",
     "original_answer": None,
     "retried_answer": None,
     "original_confidence": None,
+    "evaluation_requested": False,
+    "evaluation_in_progress": False,
+    
+    
+    #audio state
+    "audio_file": None,
+    "audio_generating": False,
 }
 
 for k, v in default_state.items():
@@ -70,8 +133,43 @@ def run_evaluation_async(result_container, question, rag_answer, contexts):
 
 
 
+def run_audio_async(result_container, text, out_path):
+    try:
+        if USE_GTTS:
+            # Cloud: Use gTTS
+            from gtts import gTTS
+            tts = gTTS(text=text, lang='en', slow=False)
+            tts.save(out_path)
+        else:
+            # Local: Use Piper + FFmpeg
+            wav_path = Path("temp_voice.wav")
+
+            subprocess.run(
+                [PIPER_EXE, "-m", PIPER_VOICE, "-f", str(wav_path)],
+                input=text.encode("utf-8"),
+                check=True
+            )
+
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", str(wav_path), "-ab", "192k", out_path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=True
+            )
+
+            if wav_path.exists():
+                wav_path.unlink()
+
+        result_container["audio_file"] = out_path
+
+    except Exception as e:
+        result_container["error"] = str(e)
+
+
 #Sidebar
 page = st.sidebar.radio("Navigation",["Ask a Question", "📊 Evaluation History"])
+
+
 
 #page1
 if page == "Ask a Question":
@@ -82,6 +180,11 @@ if page == "Ask a Question":
         "Ask questions over video transcripts. "
         "Answers are streamed and then evaluated.Before Asking a Question Go Through the Readme file to know which all questions you can ask."
     )
+    
+    # Show TTS mode indicator
+    tts_mode = "gTTS (Cloud)" if USE_GTTS else "Piper (Local)"
+    st.caption(f"🔊 TTS Mode: {tts_mode}")
+    
     st.divider()
 
     # text area
@@ -99,6 +202,8 @@ if page == "Ask a Question":
     if clear_clicked:
         for k in default_state:
             st.session_state[k] = default_state[k]
+        if os.path.exists("answer.mp3"):
+            os.remove("answer.mp3")
         st.rerun()
 
     
@@ -110,12 +215,14 @@ if page == "Ask a Question":
         st.session_state.rag_answer = None
         st.session_state.eval_out = None
         st.session_state.stream_done = False
-        st.session_state.rendered_answer = ""
+        st.session_state.answer_placeholder_content = ""
         st.session_state.original_answer = None
         st.session_state.retried_answer = None
         st.session_state.original_confidence = None
-
-        answer_placeholder = st.empty()
+        st.session_state.evaluation_requested = False
+        #for audio
+        st.session_state.audio_file = None
+        st.session_state.audio_generating = False
 
         # we call the ask function in retriever_pipeline2.py
         with st.spinner("Generating answer..."):
@@ -131,19 +238,26 @@ if page == "Ask a Question":
 
         for ans in answers:
             rendered += ans + "\n\n"
-            answer_placeholder.markdown(rendered, unsafe_allow_html=True)
             time.sleep(0.2)
 
-        st.session_state.rendered_answer = rendered
+        st.session_state.answer_placeholder_content = rendered
         st.session_state.stream_done = True
 
-        # evaluate we call the evaluate_answer funtion in evaluate_pipeline.py
-        # with st.spinner("Evaluating answer quality..."):
-        #     st.session_state.eval_out = evaluate_answer(
-        #         question=st.session_state.question,
-        #         rag_answer=st.session_state.rag_answer,
-        #         retrieved_contexts=st.session_state.contexts
-        #     )
+    # Display the answer (only once)
+    if st.session_state.answer_placeholder_content:
+        st.subheader("🧠 Answer")
+        st.markdown(st.session_state.answer_placeholder_content, unsafe_allow_html=True)
+
+    # Show evaluate button if answer is ready but evaluation not done
+    if st.session_state.stream_done and not st.session_state.eval_out:
+        st.divider()
+        if st.button("🔍 Evaluate Answer Quality", use_container_width=True):
+            st.session_state.evaluation_requested = True
+            st.session_state.evaluation_in_progress = True
+            st.rerun()
+
+    # Run evaluation if requested
+    if st.session_state.evaluation_requested and not st.session_state.eval_out and st.session_state.evaluation_in_progress:
         
         progress_bar = st.progress(0)
         status = st.empty()
@@ -175,15 +289,18 @@ if page == "Ask a Question":
         status.text("✅ Evaluation complete")
 
         st.session_state.eval_out = result_container["output"]
+        st.session_state.original_confidence = st.session_state.eval_out["confidence"]
+        st.session_state.evaluation_requested = False
+        st.session_state.evaluation_in_progress = False
+        
+        
         time.sleep(0.5)
         progress_bar.empty()
         status.empty()
+        st.rerun()
 
-
-        st.session_state.original_confidence = st.session_state.eval_out["confidence"]
-
-
-    if st.session_state.stream_done and st.session_state.eval_out:
+    # Show evaluation results
+    if st.session_state.eval_out:
 
         st.divider()
         confidence = st.session_state.eval_out["confidence"]
@@ -203,7 +320,7 @@ if page == "Ask a Question":
                 logger.info("Retry triggered")
 
                 st.session_state.stream_done = False
-                st.session_state.rendered_answer = ""
+                st.session_state.answer_placeholder_content = ""
 
                 answer_placeholder = st.empty()
 
@@ -222,7 +339,7 @@ if page == "Ask a Question":
                     answer_placeholder.markdown(rendered, unsafe_allow_html=True)
                     time.sleep(0.2)
 
-                st.session_state.rendered_answer = rendered
+                st.session_state.answer_placeholder_content = rendered
                 st.session_state.stream_done = True
 
                 with st.spinner("Re-evaluating retried answer..."):
@@ -231,6 +348,8 @@ if page == "Ask a Question":
                         rag_answer=st.session_state.rag_answer,
                         retrieved_contexts=st.session_state.contexts
                     )
+                
+                st.rerun()
 
         
         if st.session_state.retried_answer:
@@ -278,11 +397,66 @@ if page == "Ask a Question":
 
         st.dataframe(summary_df, use_container_width=True)
 
+    # ═══════════════════════════════════════════════════
+    # 🔊 AUDIO SECTION (Independent, Non-blocking)
+    # ═══════════════════════════════════════════════════
+
+    if st.session_state.stream_done and st.session_state.rag_answer:
+            st.divider()
+            st.subheader("🔊 Listen to the Answer")
+            is_evaluating = st.session_state.evaluation_in_progress
+            # If audio already exists
+            if st.session_state.audio_file and os.path.exists(st.session_state.audio_file):
+                st.audio(st.session_state.audio_file, format="audio/mp3")
+                with open(st.session_state.audio_file, "rb") as f:
+                    st.download_button(
+                        "⬇️ Download Audio",
+                        f,
+                        file_name="VideoRAG_Answer.mp3",
+                        mime="audio/mpeg"
+                    )
+            # Show generate button (no reload)
+            elif not st.session_state.audio_generating:
+                if is_evaluating:
+                    st.info("🔒 Audio generation will be available after evaluation completes")
+                    st.button("🎧 Generate Audio", use_container_width=True, disabled=True)
+                else:
+                    if st.button("🎧 Generate Audio", use_container_width=True):
+                        st.session_state.audio_generating = True
+                        st.rerun()
+            # Audio generation in progress
+            if st.session_state.audio_generating and not st.session_state.audio_file:
+                audio_container = {}
+                audio_thread = threading.Thread(
+                    target=run_audio_async,
+                    args=(audio_container, st.session_state.rag_answer, "answer.mp3")
+                )
+                audio_thread.start()
+
+                audio_progress = st.progress(0)
+                audio_status = st.empty()
+                start = time.time()
+                while audio_thread.is_alive():
+                    elapsed = time.time() - start
+                    progress = min(elapsed / 20, 0.95)
+                    audio_progress.progress(progress)
+                    audio_status.text(f"🎵 Generating audio… {int(progress*100)}%")
+                    time.sleep(0.3)
+
+                audio_thread.join()
+                audio_progress.progress(1.0)
+                audio_status.text("✅ Audio ready!")
+                
+                if "audio_file" in audio_container:
+                    st.session_state.audio_file = audio_container["audio_file"]
+
+                st.session_state.audio_generating = False
+                time.sleep(0.5)
+                st.rerun()
+
 # Page2 : Evaluation History
 else:
-
     st.title("📊 Evaluation History")
-
     if not os.path.exists(LOG_FILE):
         st.info("No evaluation logs found yet.")
         st.stop()

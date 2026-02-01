@@ -15,7 +15,7 @@
 #(Relevant+Diverse)
 
 from langchain_chroma import Chroma
-from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_huggingface import HuggingFaceEmbeddings
 
 from langchain_community.retrievers import BM25Retriever
