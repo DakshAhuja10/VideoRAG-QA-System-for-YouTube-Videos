@@ -40,7 +40,7 @@ st.set_page_config(page_title="VideoRAG",page_icon="🎥",layout="wide")
 
 # Check if running on Streamlit Cloud
 IS_STREAMLIT_CLOUD = os.environ.get("STREAMLIT_SERVER_HEADLESS") == "true"
-
+USE_GTTS=False
 
 if IS_STREAMLIT_CLOUD:
     logger.info("Running on Streamlit Cloud - using gTTS")
