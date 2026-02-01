@@ -15,7 +15,7 @@ You can try the deployed **VideoRAG** application here:
 > Answer evaluation can take longer (≈2–2.5 minutes) because it triggers **multiple sequential LLM calls** for RAG quality metrics and runs on **shared, rate-limited cloud infrastructure**.  
 > See the *Evaluation Latency* section below for details.
 
-
+---
 
 ## ⚠️ Important Usage Note (Read Before Asking Questions)
 
@@ -27,7 +27,7 @@ The system can answer questions **only if the information exists explicitly in t
 
 If you ask a question **outside the scope of this content**, the system will intentionally respond with:
 
-> **“I don’t know. The transcripts do not contain the answer.”**
+> **"I don't know. The transcripts do not contain the answer."**
 
 This behavior is **by design** to prevent hallucinations and ensure faithful, grounded answers.
 
@@ -82,54 +82,45 @@ To see VideoRAG perform at its best, try asking **questions that are explicitly 
 ### ⚠️ Reminder
 If you ask questions **outside the scope of the indexed videos**, the system will intentionally respond with:
 
-> **“I don’t know. The transcripts do not contain the answer.”**
+> **"I don't know. The transcripts do not contain the answer."**
 
 This indicates that the system is **avoiding hallucination by answering only from verified transcript context**.
-
 
 ---
 
 ## 🚀 Key Features
 
 * **YouTube Playlist Ingestion**
-
   * Extracts video URLs and metadata using `yt-dlp`
   * Deduplicates videos across runs
 
 * **Transcript Extraction**
-
   * Fetches English transcripts line-by-line
   * Preserves timestamps for precise citations
   * Incremental processing (no rework on already processed videos)
 
 * **Cost-Efficient Embedding Pipeline**
-
   * Uses SHA-256 hashing to detect duplicate text
   * Reuses embeddings when transcript text is identical
   * Avoids unnecessary calls to embedding APIs
 
 * **Persistent Vector Store**
-
   * ChromaDB for disk-backed persistence
   * Designed for long-term usage and incremental updates
 
 * **Hybrid Retrieval Strategy**
-
   * **MMR Retriever** → relevance + diversity
   * **Multi-Query Retriever** → handles ambiguous queries
   * **BM25 Retriever** → keyword-based lexical search
   * Automatic deduplication across retrievers
 
 * **Strictly Grounded Answer Generation**
-
   * Answers ONLY from retrieved transcript chunks
   * Clickable YouTube timestamps for every answer
   * Hallucination-resistant prompt design
 
-* **Automated RAG Evaluation**
-
+* **RAG Evaluation**
   * Evaluated on:
-
     * Context Precision
     * Context Recall
     * Faithfulness
@@ -138,7 +129,6 @@ This indicates that the system is **avoiding hallucination by answering only fro
   * Low-confidence answers automatically logged
 
 * **Interactive Frontend**
-
   * Streamlit UI with streamed answers
   * Confidence visualization (high / medium / low)
   * Retry on low confidence with re-evaluation
@@ -160,8 +150,8 @@ The system retrieves relevant context, generates grounded answers, and provides 
 
 ---
 
-### 2️⃣ Automatic RAG Evaluation (RAGAS)
-Each answer is automatically evaluated using **RAGAS** on context precision, context recall, faithfulness, and answer relevancy.  
+### 2️⃣ RAG Evaluation (RAGAS)
+Each answer is evaluated using **RAGAS** on context precision, context recall, faithfulness, and answer relevancy.  
 A confidence score is computed to assess answer reliability.
 
 <p align="center">
@@ -195,8 +185,9 @@ This makes retrieval instability transparent and demonstrates how improved conte
   <img src="assets/UI-4.png" width="900"/>
 </p>
 
-## 🧠 System Architecture
+---
 
+## 🧠 System Architecture
 ```
 YouTube Playlist
       ↓
@@ -214,7 +205,7 @@ Hybrid Retrieval (MMR + MultiQuery + BM25)
       ↓
 LLM Answer Generation (Groq)
       ↓
-RAGAS Evaluation
+RAGAS Evaluation/Generate an audio
       ↓
 Streamlit Frontend + Logs
 ```
@@ -224,37 +215,35 @@ Streamlit Frontend + Logs
 ## 🛠️ Tech Stack
 
 **Languages & Frameworks**
-
 * Python
 * Streamlit
 
 **LLMs & Embeddings**
-
 * Google Gemini (`text-embedding-004`)
 * Gemini 2.5 Flash (multi-query generation)
 * Groq (`openai/gpt-oss-120B`) for answer generation & evaluation
 
 **RAG & Retrieval**
-
 * LangChain
 * ChromaDB
 * BM25 Retriever
 * MultiQuery Retriever
 * MMR Retriever
 
-**Evaluation**
+**Text-to-Speech**
+* Piper (offline, local)
+* gTTS (cloud deployment)
 
+**Evaluation**
 * RAGAS
 
 **Data Handling**
-
 * Pandas
 * CSV-based incremental pipelines
 
 ---
 
 ## 📁 Project Structure
-
 ```
 .
 ├── youtube_meta_data.py
@@ -268,8 +257,8 @@ Streamlit Frontend + Logs
 │   ├── app.log
 │   └── rag_evaluation_log.csv
 ├── chroma_db/
-└── README.md
-└── assets
+├── README.md
+└── assets/
 ```
 
 ---
@@ -277,14 +266,12 @@ Streamlit Frontend + Logs
 ## ⚙️ Setup & Installation
 
 ### 1️⃣ Clone the Repository
-
 ```bash
 git clone https://github.com/your-username/VideoRAG.git
 cd VideoRAG
 ```
 
 ### 2️⃣ Install Dependencies
-
 ```bash
 pip install -r requirements.txt
 ```
@@ -292,7 +279,6 @@ pip install -r requirements.txt
 ### 3️⃣ Environment Variables
 
 Create a `.env` file:
-
 ```env
 GOOGLE_API_KEY=your_google_api_key
 GROQ_API_KEY=your_groq_api_key
@@ -300,28 +286,118 @@ GROQ_API_KEY=your_groq_api_key
 
 ---
 
+## 🔊 Text-to-Speech (TTS) Support
+
+VideoRAG includes **spoken answer generation** using a **dual Text-to-Speech (TTS) backend** that automatically adapts to the execution environment.
+
+The system selects the appropriate TTS engine **without any manual configuration**, ensuring smooth local development and cloud deployment.
+
+---
+
+### 🔁 Automatic TTS Backend Selection
+
+| Environment | TTS Engine | Why |
+|------------|-----------|-----|
+| **Local machine** | **Piper (Offline TTS)** | Fast, high-quality, fully offline,No API required |
+| **Streamlit Cloud** | **gTTS (Google Text-to-Speech)** | Cloud-safe, no native binaries required |
+
+The UI clearly displays the active mode:
+```
+🔊 TTS Mode: Piper (Local)
+```
+or
+```
+🔊 TTS Mode: gTTS (Cloud)
+```
+
+---
+
+## 🖥️ Local Setup: Piper (Offline Text-to-Speech)
+
+Piper is used **only in local environments**, as Streamlit Cloud does not allow native binaries.
+
+### 1️⃣ Download Piper
+
+Download the latest Piper release from the official repository:
+
+**https://github.com/rhasspy/piper/releases**
+
+Extract the files to the following directory (Windows):
+```
+D:\piper\
+```
+
+Your folder should contain:
+```
+D:\piper
+├── piper.exe
+├── en_US-lessac-medium.onnx
+```
+
+---
+
+### 2️⃣ Verify Piper Installation
+
+Run:
+```bash
+D:\piper\piper.exe --help
+```
+
+If the help menu appears, Piper is installed correctly.
+
+---
+
+### 3️⃣ Install FFmpeg (Required)
+
+Piper outputs WAV audio, which is converted to MP3 using FFmpeg.
+
+Download FFmpeg (Windows static build):
+
+**https://www.gyan.dev/ffmpeg/builds/**
+
+Add FFmpeg to your system PATH, then verify:
+```bash
+ffmpeg -version
+```
+
+
+## ☁️ Streamlit Cloud Setup: gTTS (Google Text-to-Speech)
+
+Streamlit Cloud does not support native executables like Piper.  
+To ensure compatibility, VideoRAG automatically switches to gTTS when deployed.
+
+### Cloud TTS Behavior
+
+On Streamlit Cloud:
+
+-   Piper is unavailable
+-  gTTS is used automatically
+-  Audio is generated directly as MP3
+-  No additional setup or environment variables are required
+
+## ⚠️ Known Limitations
+
+- gTTS requires an active internet connection
+- Piper is currently configured for English voices only
+
 ## ▶️ Running the Pipeline
 
 ### Step 1: Extract Video Metadata
-
 ```bash
 python youtube_meta_data.py
 ```
 
 ### Step 2: Generate Transcripts
-
 ```bash
 python transcript_generate.py
 ```
 
 ### Step 3: Build / Update Vector Store
-
 ```bash
 python vector_store_chroma.py
 ```
 
 ### Step 4: Launch Frontend
-
 ```bash
 streamlit run frontend1.py
 ```
@@ -347,11 +423,6 @@ Low-confidence answers are automatically logged for inspection and improvement.
 
 ### ⏱️ Evaluation Latency on Streamlit Cloud
 
-Automatic answer evaluation uses **multiple LLM calls** (via RAGAS) to assess:
-- Faithfulness
-- Answer relevancy
-- Context grounding quality
-
 Because this app is deployed on **Streamlit Cloud (shared infrastructure)**, evaluation may take:
 
 > ⏳ **~2–2.5 minutes per evaluation**
@@ -370,23 +441,27 @@ In a production or self-hosted environment, evaluation latency can be reduced si
 - Running evaluation asynchronously
 - Moving evaluation to offline or batch pipelines
 
+---
 
 ## 🎯 Design Decisions
 
-* **No Text Splitter**
+* **No Text Splitter**  
   Transcripts are already timestamped line-by-line. Further splitting would break temporal grounding.
 
-* **Hash-Based Deduplication**
+* **Hash-Based Deduplication**  
   Prevents repeated embedding generation → saves cost and time.
 
-* **Hybrid Retrieval**
+* **Hybrid Retrieval**  
   Combines semantic, lexical, and query-expansion techniques for robust recall.
 
-* **Strict Prompt Constraints**
+* **Strict Prompt Constraints**  
   Forces grounded, timestamped, multi-sentence answers only from context.
 
-* **Evaluation-Driven Development**
+* **Evaluation-Driven Development**  
   RAG quality is continuously measured, logged, and improved.
+
+* **Capability-Based TTS Selection**  
+  Automatically switches between Piper (local) and gTTS (cloud) without manual configuration.
 
 ---
 
@@ -397,6 +472,7 @@ In a production or self-hosted environment, evaluation latency can be reduced si
 * User feedback loop integrated into evaluation
 * Dockerized deployment
 * Support for multiple playlists / domains
+* Multi-language TTS support
 
 ---
 
@@ -408,5 +484,3 @@ In a production or self-hosted environment, evaluation latency can be reduced si
 * Knowledge extraction from YouTube channels
 
 ---
-
-
