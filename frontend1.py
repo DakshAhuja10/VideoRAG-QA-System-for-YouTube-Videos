@@ -33,7 +33,6 @@ for noisy in ["httpx", "groq", "ragas"]:
     logging.getLogger(noisy).setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
-st.write("ENV:", dict(os.environ))
 
 
 st.set_page_config(page_title="VideoRAG",page_icon="🎥",layout="wide")
