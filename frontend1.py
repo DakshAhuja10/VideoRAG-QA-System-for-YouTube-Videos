@@ -39,9 +39,10 @@ st.write("ENV:", dict(os.environ))
 st.set_page_config(page_title="VideoRAG",page_icon="🎥",layout="wide")
 
 
-# Check if running on Streamlit Cloud
-IS_STREAMLIT_CLOUD = os.environ.get("STREAMLIT_SERVER_HEADLESS") == "true"
-USE_GTTS=True
+IS_STREAMLIT_CLOUD = (
+    os.environ.get("SF_PARTNER") == "streamlit"
+    or os.environ.get("HOSTNAME") == "streamlit"
+)
 
 if IS_STREAMLIT_CLOUD:
     logger.info("Running on Streamlit Cloud - using gTTS")
