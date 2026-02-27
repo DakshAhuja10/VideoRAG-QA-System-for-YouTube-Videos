@@ -1,10 +1,10 @@
 import pandas as pd
 from pathlib import Path
-#this library is used to get the transcript of a video 
+from config import VIDEOS_CSV, TRANSCRIPT_CSV
 from youtube_transcript_api import YouTubeTranscriptApi
 
-INPUT_CSV = Path("15.LexiChat/videos.csv")
-OUTPUT_CSV = Path("15.LexiChat/video_with_meta_data_and_transcript.csv")
+INPUT_CSV = VIDEOS_CSV
+OUTPUT_CSV = TRANSCRIPT_CSV
 
 ytt_api = YouTubeTranscriptApi()
 
@@ -67,14 +67,15 @@ for _, row in df_videos.iterrows():
 
 if rows:
     df_new = pd.DataFrame(rows)
-
-    if df_existing is not None:
-        final_df = pd.concat([df_existing, df_new], ignore_index=True)
-    else:
-        final_df = df_new
-
-    final_df.to_csv(OUTPUT_CSV, index=False)
-    print(f"Saved {len(df_new)} new transcript rows.")
+    try:
+        df_new.to_csv(OUTPUT_CSV, mode='a', header=not OUTPUT_CSV.exists(), index=False)
+        print(f"Saved {len(df_new)} new transcript rows.")
+    except PermissionError:
+        fallback_file = OUTPUT_CSV.with_name(OUTPUT_CSV.stem + "_fallback.csv")
+        print(f"Warning: {OUTPUT_CSV} is locked or read-only. Permission denied.")
+        df_new.to_csv(fallback_file, mode='a', header=not fallback_file.exists(), index=False)
+        print(f"Saved {len(df_new)} new transcript rows to fallback file: {fallback_file}")
+        print("Please resolve the lock on the original file and merge the contents manually.")
 else:
     print("No new transcripts to add.")
 

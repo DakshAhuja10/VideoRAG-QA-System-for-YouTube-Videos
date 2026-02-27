@@ -27,16 +27,31 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_groq import ChatGroq
 
 from ragas.prompt import PydanticPrompt
-PydanticPrompt.default_n = 1
 
-#Path Where log file is stored/should be created
-LOG_FILE = "logs/rag_evaluation_log.csv"
+# Import configuration
+from config import (
+    RAG_EVALUATION_LOG_FILE,
+    EmbeddingConfig,
+    LLMConfig,
+    EvaluationConfig,
+    get_confidence_weights,
+)
+
+# RAGAS configuration
+PydanticPrompt.default_n = EvaluationConfig.RAGAS_DEFAULT_N
+
+# Path where log file is stored/should be created
+LOG_FILE = str(RAG_EVALUATION_LOG_FILE)
 os.makedirs("logs", exist_ok=True)
 
 
-embedding_model=HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+# Initialize models with config
+embedding_model = HuggingFaceEmbeddings(model_name=EmbeddingConfig.MODEL_NAME)
 
-llm = ChatGroq(model="openai/gpt-oss-20b",temperature=0)
+llm = ChatGroq(
+    model=LLMConfig.EVAL_MODEL,
+    temperature=LLMConfig.EVAL_TEMPERATURE
+)
 
 
 def extract_json(text: str):
@@ -45,13 +60,15 @@ def extract_json(text: str):
         raise ValueError("No JSON found")
     return json.loads(match.group())
 
-#returns the confidence score and we focused mainly on did answer stick to the context or not??
+# Compute confidence score using weighted metrics from config
+# Weights are defined in config.py with explanations
 def compute_confidence(row):
+    weights = get_confidence_weights()
     return (
-        0.30 * row["answer_relevancy"]
-        + 0.40 * row["faithfulness"]
-        + 0.20 * row["context_recall"]
-        + 0.10 * row["context_precision"]
+        weights["answer_relevancy"] * row["answer_relevancy"]
+        + weights["faithfulness"] * row["faithfulness"]
+        + weights["context_recall"] * row["context_recall"]
+        + weights["context_precision"] * row["context_precision"]
     )
 
 
@@ -107,13 +124,31 @@ def generate_reference_answer(question, context):
 
 
 
+def clean_answer_for_evaluation(answer: str) -> str:
+    """
+    Removes UI formatting (like markdown links and timestamps) from the answer
+    so RAGAS can evaluate the semantic text without penalizing for 'hallucinated' links.
+    """
+    # Remove markdown links like [12:34](https://...)
+    cleaned = re.sub(r'\[\d{1,2}:\d{2}\]\(.*?\)', '', answer)
+    # Remove standalone URLs
+    cleaned = re.sub(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', '', cleaned)
+    # Remove numbered lists if they are just formatting
+    cleaned = re.sub(r'^\d+\.\s+', '', cleaned, flags=re.MULTILINE)
+    # Remove extra whitespace
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned
+
 def evaluate_answer(question, rag_answer, retrieved_contexts):
     formatted_context = "\n".join(retrieved_contexts)
     reference = generate_reference_answer(question,formatted_context)
+    
+    # Clean the answer so RAGAS doesn't penalize UI formatting
+    cleaned_rag_answer = clean_answer_for_evaluation(rag_answer)
 
     dataset = Dataset.from_pandas(pd.DataFrame([{
         "user_input": question,
-        "response": rag_answer,
+        "response": cleaned_rag_answer,
         "retrieved_contexts": retrieved_contexts,
         "reference": reference,
     }]))
@@ -145,15 +180,15 @@ def evaluate_answer(question, rag_answer, retrieved_contexts):
 
     confidence = compute_confidence(numeric_scores)
 
-    # It automatically logs all low scores
-    if confidence < 0.6 or "I don't know" in rag_answer:
-        log_evaluation(
-            question,
-            rag_answer,
-            reference,
-            numeric_scores,
-            confidence,
-        )
+    # Always log all evaluations to build a complete history
+    # This allows tracking performance trends over time
+    log_evaluation(
+        question,
+        rag_answer,
+        reference,
+        numeric_scores,
+        confidence,
+    )
 
     return {
         "question": question,

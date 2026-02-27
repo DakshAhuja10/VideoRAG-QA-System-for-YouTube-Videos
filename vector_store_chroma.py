@@ -4,30 +4,31 @@ from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from tqdm import tqdm  #to get the status bar while we are creating embedding
 import uuid
+from config import TRANSCRIPT_CSV, VectorStoreConfig, EmbeddingConfig
 
 from doc_loader import Csv_Loader
 from dotenv import load_dotenv
 load_dotenv()
 
 # PERSIST_PATH = "15.LexiChat/chroma_db" # where chroma db is stored locally
-PERSIST_PATH = "chroma_db" # on cloud
-CSV_PATH = "15.LexiChat/video_with_meta_data_and_transcript.csv" #meta data along with transcripts
+PERSIST_PATH = str(VectorStoreConfig.PERSIST_DIRECTORY) # on cloud
+CSV_PATH = TRANSCRIPT_CSV #meta data along with transcripts
 
 
-def build_vector_store():
+def build_vector_store(progress_callback=None):
     loader = Csv_Loader(CSV_PATH)
     docs = loader.load()   #use lazy_load if size of transcripts become greater than 2MB
     print(f"Loaded {len(docs)} transcript documents.")
     print("Loading completed.")
 
     
-    embedder = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+    embedder = HuggingFaceEmbeddings(model_name=EmbeddingConfig.MODEL_NAME)
 
     
     vector_store = Chroma(
         embedding_function=embedder,
         persist_directory=PERSIST_PATH,
-        collection_name="lexi_transcripts"
+        collection_name=VectorStoreConfig.COLLECTION_NAME
     )
 
     collection = vector_store._collection
@@ -48,7 +49,12 @@ def build_vector_store():
 
     print("Processing documents...\n")
 
-    for doc in tqdm(docs):
+    total_docs = len(docs)
+    for i, doc in enumerate(tqdm(docs)):
+        if progress_callback and i % 100 == 0: # Update progress less frequently
+            pct = 80 + int((i / total_docs) * 20)
+            progress_callback(pct, f"Generating embeddings... ({i}/{total_docs})")
+
         text = doc.page_content
         metadata = doc.metadata
         text_hash = metadata["text_hash"]

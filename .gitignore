@@ -32,3 +32,17 @@ piper_voices_output/
 # Logs / temp
 # ======================
 *.log
+logs/
+
+# ======================
+# Streamlit secrets
+# ======================
+.streamlit/secrets.toml
+
+# ======================
+# Dev / internal docs
+# ======================
+METRICS_TRACKING.md
+metrics_tracker.py
+CODE_QUALITY_IMPROVEMENTS.md
+BUGFIX_EVALUATION_HISTORY.md

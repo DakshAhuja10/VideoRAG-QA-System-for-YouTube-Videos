@@ -16,21 +16,37 @@ def dump_urls_to_file(playlist_url: str, file_path):
         info = ydl.extract_info(playlist_url, download=False)
         
     entries = info.get("entries") or []
-    #opens the file and writes all the urls to it
-    with open(file_path, "w", encoding="utf-8") as f:
+    
+    # Read existing URLs to prevent duplicates and overwriting
+    import os
+    existing_urls = set()
+    if os.path.exists(file_path):
+        with open(file_path, "r", encoding="utf-8") as f:
+            for line in f:
+                existing_urls.add(line.strip())
+
+    #opens the file and appends new urls to it
+    with open(file_path, "a", encoding="utf-8") as f:
         for e in entries:
             vid = e.get("id") or e.get("url")
             if vid:
-                f.write(f"https://www.youtube.com/watch?v={vid}\n")
+                url = f"https://www.youtube.com/watch?v={vid}"
+                if url not in existing_urls:
+                    f.write(f"{url}\n")
+                    existing_urls.add(url)
 
 
 #reads the csv file and returns all the unique urls
 def read_csv_file(file_path):
     set_urls = set()
-    with open(file_path, "r") as f:
+    import os
+    if not os.path.exists(file_path):
+        return set_urls
+    with open(file_path, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            set_urls.add(row['url'])
+            if 'url' in row:
+                set_urls.add(row['url'])
     return set_urls
 
 #this function is used to get all the metadeta related to a youtube video using its video id
@@ -60,15 +76,19 @@ def get_video_info(video_url):
 
 #this function appends the metadata to the csv file
 def append_data_to_csv(video_info, file_path):
-    with open(file_path, "a") as f:
+    import os
+    file_exists = os.path.exists(file_path) and os.path.getsize(file_path) > 0
+    with open(file_path, "a", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(
             f, fieldnames=["title", "length", "video_id", "publish_date", "views", "url"]
         )
+        if not file_exists:
+            writer.writeheader()
         writer.writerow(video_info)
 
 
 if __name__ == "__main__":
-    playlist_url = "https://www.youtube.com/playlist?list=PLv-SNV2XmnZn2sCxxFw6SVt2UlEtyLMTP"
+    playlist_url = "https://www.youtube.com/playlist?list=PLmWa9ZZLlCjvTdH_rk9NwZtsd2h9ORZYt"
     urls_file_path = "15.LexiChat/urls.txt"
     csv_file_path = "15.LexiChat/videos.csv"
 
