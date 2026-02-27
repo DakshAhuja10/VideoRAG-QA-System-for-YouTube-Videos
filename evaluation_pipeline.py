@@ -25,6 +25,7 @@ from ragas.metrics import (
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_groq import ChatGroq
+import streamlit as st
 
 from ragas.prompt import PydanticPrompt
 
@@ -45,13 +46,25 @@ LOG_FILE = str(RAG_EVALUATION_LOG_FILE)
 os.makedirs("logs", exist_ok=True)
 
 
-# Initialize models with config
-embedding_model = HuggingFaceEmbeddings(model_name=EmbeddingConfig.MODEL_NAME)
+# ── Cached resource loaders ──────────────────────────────────────────────────
+# Both models are large and slow to initialise.  Caching them ensures they are
+# loaded once per process and shared across all evaluation calls and sessions.
 
-llm = ChatGroq(
-    model=LLMConfig.EVAL_MODEL,
-    temperature=LLMConfig.EVAL_TEMPERATURE
-)
+@st.cache_resource(show_spinner=False)
+def _load_eval_embeddings():
+    return HuggingFaceEmbeddings(model_name=EmbeddingConfig.MODEL_NAME)
+
+
+@st.cache_resource(show_spinner=False)
+def _load_eval_llm():
+    return ChatGroq(
+        model=LLMConfig.EVAL_MODEL,
+        temperature=LLMConfig.EVAL_TEMPERATURE,
+    )
+
+
+embedding_model = _load_eval_embeddings()
+llm             = _load_eval_llm()
 
 
 def extract_json(text: str):

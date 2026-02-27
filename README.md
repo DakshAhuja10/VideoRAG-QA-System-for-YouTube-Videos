@@ -22,7 +22,7 @@ You can try the deployed **VideoRAG** application here:
 This application is a **content-grounded VideoRAG system**, not a general-purpose chatbot.
 
 ### 📌 What content is indexed?
-Embeddings have been created **only for transcripts from a limited set of YouTube videos (currently 12 videos)**.  
+Embeddings have been created **only for transcripts from a limited set of YouTube videos (currently 19 videos)**.  
 The system can answer questions **only if the information exists explicitly in these transcripts**.
 
 If you ask a question **outside the scope of this content**, the system will intentionally respond with:
@@ -37,18 +37,32 @@ This behavior is **by design** to prevent hallucinations and ensure faithful, gr
 
 Please ask questions **only related to the following videos** to get relevant and high-confidence answers:
 
-- https://www.youtube.com/watch?v=wKw1tpN7NVE  
-- https://www.youtube.com/watch?v=_ySbzVXiwzQ  
-- https://www.youtube.com/watch?v=pXEl0R1BX-g  
-- https://www.youtube.com/watch?v=KceRmxCnXDA  
-- https://www.youtube.com/watch?v=l5Uw8qG7vZU  
-- https://www.youtube.com/watch?v=GFB0o1QQyLw  
-- https://www.youtube.com/watch?v=wuJa1lnv_TQ  
-- https://www.youtube.com/watch?v=0VH1Lim8gL8  
-- https://www.youtube.com/watch?v=O5xeyoRL95U  
-- https://www.youtube.com/watch?v=EUowNpYL120  
-- https://www.youtube.com/watch?v=tXgtV_P87ZE  
-- https://www.youtube.com/watch?v=w7mTuL1hfzA  
+**🧠 Lex Fridman — Personal Development & Mindset**
+- https://www.youtube.com/watch?v=wKw1tpN7NVE — Do Something Difficult Every Day | AMA #1
+- https://www.youtube.com/watch?v=_ySbzVXiwzQ — How to Learn and Master a New Skill
+- https://www.youtube.com/watch?v=pXEl0R1BX-g — Make Disadvantage Your Superpower | AMA #6
+- https://www.youtube.com/watch?v=KceRmxCnXDA — Who is Hedgy? A Story of Minimalism | AMA #5
+- https://www.youtube.com/watch?v=l5Uw8qG7vZU — Impostor Syndrome — Pave Your Own Path | AMA #4
+- https://www.youtube.com/watch?v=GFB0o1QQyLw — Dealing with Negative Comments | AMA #3
+- https://www.youtube.com/watch?v=wuJa1lnv_TQ — Sleep and Burnout | AMA #2
+
+**🤖 Deep Learning & AI**
+- https://www.youtube.com/watch?v=0VH1Lim8gL8 — Deep Learning State of the Art (2020)
+- https://www.youtube.com/watch?v=O5xeyoRL95U — Deep Learning Basics: Introduction and Overview
+- https://www.youtube.com/watch?v=hmtuvNfytjM — Sam Altman Shows Me GPT-5... And What's Next
+- https://www.youtube.com/watch?v=cGskUxUgzY8 — Are Alien Civilizations Powered by Nuclear Fusion? | David Kirtley & Lex Fridman
+
+**🌍 Geopolitics**
+- https://www.youtube.com/watch?v=EUowNpYL120 — The Art of Geopolitics, Part 1: Introduction
+- https://www.youtube.com/watch?v=tXgtV_P87ZE — The Art of Geopolitics, Part 2: Human Dimension
+- https://www.youtube.com/watch?v=w7mTuL1hfzA — Art of Geopolitics Part 3: The Great Game
+- https://www.youtube.com/watch?v=Zgx8lcf_qqg — Geopolitical Momentum: Is EU-India Deal a Challenge to Great Powers?
+- https://www.youtube.com/watch?v=FdjnOdLDAbg — Greenland's Secret SUPERPOWER | Geopolitical Case Study
+- https://www.youtube.com/watch?v=YwcXLZE-EHo — How Board Games Explain the New World Order
+
+**🇮🇳 Republic Day 2026**
+- https://www.youtube.com/watch?v=lMmPM6TS1e8 — Republic Day 2026: Four-Legged Warriors to Debut at R-Day Parade
+- https://www.youtube.com/watch?v=M3xg4v8Kv54 — Republic Day 2026: Indian Army To Showcase Elite Animal Force
 
 ---
 
@@ -56,26 +70,35 @@ Please ask questions **only related to the following videos** to get relevant an
 
 To see VideoRAG perform at its best, try asking **questions that are explicitly discussed in the indexed videos** listed above.
 
-**🎓 Concepts & Explanations**
-- What possibilities of deep learning does the speaker say it can bring to the world?
-- What is geopolitics?
-- What does the speaker say about learning representations from data?  
+**🎓 Deep Learning & AI Concepts**
+- What possibilities does the speaker say deep learning can bring to the world?
+- What does the speaker say about learning representations from data?
 - How are neural networks explained in the context of real-world problems?
+- What does Sam Altman say about GPT-5 and what comes next after it?
+- What is the speaker's view on nuclear fusion as an energy source for civilization?
 
-**🧠 Philosophy & Thinking**
-- What is said about discipline and consistency in learning or research?  
-- How does the speaker approach long-term thinking and progress?  
+**🌍 Geopolitics**
+- What is geopolitics?
+- How is the EU-India deal described in the context of great power competition?
+- What makes Greenland geopolitically significant?
+- How do board games explain the structure of the new world order?
+- What is the Great Game and how does it relate to modern geopolitics?
+
+**🇮🇳 Republic Day 2026**
+- What animal units are being showcased at the Republic Day 2026 parade?
+- How does the Indian Army use animals in its operations?
+
+**🧠 Philosophy & Mindset**
+- What is said about discipline and consistency in learning or research?
+- How does the speaker approach long-term thinking and progress?
 - What mindset is recommended for mastering difficult technical subjects?
+- How does the speaker suggest dealing with impostor syndrome?
 
 **🛠️ Practical Advice**
-- What advice is given for beginners entering machine learning or AI?  
-- How does the speaker suggest dealing with failure or confusion while learning?  
+- What advice is given for beginners entering machine learning or AI?
+- How does the speaker suggest dealing with failure or confusion while learning?
 - What role does practice play according to the speaker?
-
-**🔍 Reflections & Insights**
-- What does the speaker say about the future of AI or machine learning?  
-- How is problem-solving framed in the context of complex systems?  
-- What habits or routines are emphasized for sustained improvement?
+- How should one deal with sleep deprivation and burnout?
 
 ---
 

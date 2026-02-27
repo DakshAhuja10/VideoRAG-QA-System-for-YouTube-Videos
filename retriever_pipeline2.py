@@ -28,6 +28,7 @@ from langchain.schema import Document
 from sentence_transformers import CrossEncoder
 from dotenv import load_dotenv
 import uuid
+import streamlit as st
 
 # Import configuration
 from config import (
@@ -44,56 +45,85 @@ from config import (
 load_dotenv()
 
 
-# Initialize embedder with config
-embedder = HuggingFaceEmbeddings(model_name=EmbeddingConfig.MODEL_NAME)
+# ── Cached resource loaders ──────────────────────────────────────────────────
+# @st.cache_resource ensures these heavy objects are initialised once per
+# process and reused across all sessions/reruns, including cold starts on
+# Streamlit Cloud.  The underscore prefix on helper names keeps them private.
 
-# Lightweight but very effective re-ranker
-rerank_model = CrossEncoder(RetrievalConfig.RERANK_MODEL)
-
-vector_store = Chroma(
-    collection_name=VectorStoreConfig.COLLECTION_NAME,
-    persist_directory=VectorStoreConfig.PERSIST_DIRECTORY,
-    embedding_function=embedder,
-)
+@st.cache_resource(show_spinner=False)
+def _load_embedder():
+    return HuggingFaceEmbeddings(model_name=EmbeddingConfig.MODEL_NAME)
 
 
-# MMR retriever with config values
-# fetch_k - fetches the top candidates for MMR to select from
-# k - from the candidates, select the best k with diversity
-mmr_retriever = vector_store.as_retriever(
-    search_type="mmr",
-    search_kwargs={"k": RetrievalConfig.MMR_K, "fetch_k": RetrievalConfig.MMR_FETCH_K},
-)
+@st.cache_resource(show_spinner=False)
+def _load_rerank_model():
+    # CrossEncoder model weights are downloaded once and cached in memory
+    return CrossEncoder(RetrievalConfig.RERANK_MODEL)
 
 
-# MultiQuery LLM with config
-mq_llm = ChatGoogleGenerativeAI(model=LLMConfig.MULTIQUERY_MODEL)
+@st.cache_resource(show_spinner=False)
+def _load_vector_store():
+    return Chroma(
+        collection_name=VectorStoreConfig.COLLECTION_NAME,
+        persist_directory=VectorStoreConfig.PERSIST_DIRECTORY,
+        embedding_function=_load_embedder(),
+    )
 
 
-# MultiQuery retriever with config
-# For all the questions LLM generates from the query, it fetches the top k relevant chunks
-# and then finally all the retrieved chunks are combined and duplicated documents are removed
-multi_retriever = MultiQueryRetriever.from_llm(
-    retriever=vector_store.as_retriever(search_kwargs={"k": RetrievalConfig.MULTIQUERY_K}),
-    llm=mq_llm,
-)
+@st.cache_resource(show_spinner=False)
+def _load_retrievers():
+    vs = _load_vector_store()
+    mq_llm = ChatGoogleGenerativeAI(model=LLMConfig.MULTIQUERY_MODEL)
+    # MMR retriever — relevance + diversity
+    mmr = vs.as_retriever(
+        search_type="mmr",
+        search_kwargs={"k": RetrievalConfig.MMR_K, "fetch_k": RetrievalConfig.MMR_FETCH_K},
+    )
+    # MultiQuery retriever — handles ambiguous queries via LLM expansion
+    mq = MultiQueryRetriever.from_llm(
+        retriever=vs.as_retriever(search_kwargs={"k": RetrievalConfig.MULTIQUERY_K}),
+        llm=mq_llm,
+    )
+    return mmr, mq
 
-# BM25 used for keyword search and retrieves the content where there are keyword matches
-# Initialize with all documents from vector store
-docs = vector_store._collection.get(include=["documents", "metadatas"])
 
-all_docs = []
-if docs and docs.get("documents"):
-    all_docs = [
-        Document(page_content=text, metadata=meta)
-        for text, meta in zip(docs["documents"], docs["metadatas"])
-    ]
+@st.cache_resource(show_spinner=False)
+def _load_bm25():
+    # BM25 requires loading all documents from ChromaDB to build its index.
+    # Caching this avoids the expensive full-collection scan on every rerun.
+    vs = _load_vector_store()
+    raw = vs._collection.get(include=["documents", "metadatas"])
+    all_docs = []
+    if raw and raw.get("documents"):
+        all_docs = [
+            Document(page_content=text, metadata=meta)
+            for text, meta in zip(raw["documents"], raw["metadatas"])
+        ]
+    if all_docs:
+        b = BM25Retriever.from_documents(all_docs)
+        b.k = RetrievalConfig.BM25_K
+        return b
+    return None
 
-if all_docs:
-    bm25 = BM25Retriever.from_documents(all_docs)
-    bm25.k = RetrievalConfig.BM25_K  # Use config value
-else:
-    bm25 = None
+
+@st.cache_resource(show_spinner=False)
+def _load_answer_llm():
+    return ChatGroq(
+        model=LLMConfig.ANSWER_MODEL,
+        temperature=LLMConfig.ANSWER_TEMPERATURE,
+    )
+
+
+# Resolve all resources at module level.
+# After the first call these are instant lookups from the cache.
+embedder        = _load_embedder()
+rerank_model    = _load_rerank_model()
+vector_store    = _load_vector_store()
+mmr_retriever, multi_retriever = _load_retrievers()
+bm25            = _load_bm25()
+
+
+# BM25 is initialised via _load_bm25() above and assigned to `bm25` at module level.
 
 
 
@@ -223,11 +253,8 @@ If an answer is shorter than two full sentences, REWRITE it to meet the rules.
 )
 
 
-# LLM for answer generation - using config values
-llm = ChatGroq(
-    model=LLMConfig.ANSWER_MODEL,
-    temperature=LLMConfig.ANSWER_TEMPERATURE
-)
+# Answer-generation LLM — cached via _load_answer_llm() above
+llm = _load_answer_llm()
 
 
 #this function is finally used to run the complete retrieval pipeline
