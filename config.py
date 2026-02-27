@@ -134,9 +134,13 @@ class LLMConfig:
 
     # Ground Truth LLM (reference answer generation)
     # MUST be a different model from EVAL_MODEL to avoid circular evaluation:
-    # llama-3.3-70b-versatile is a strong general model, completely separate
-    # from the openai/gpt-oss-120b judge and the llama-3.1-8b-instant answer model.
-    GROUND_TRUTH_MODEL = "llama-3.3-70b-versatile"  # Groq model
+    # qwen/qwen3-32b (Alibaba/Qwen family) is chosen because:
+    # - Completely different family from both the answer model (Meta/Llama)
+    #   and the RAGAS judge (OpenAI GPT-OSS) — genuine independence
+    # - 32B params with strong synthesis ability; does NOT default to
+    #   "I don't know" on questions that require reasoning from context,
+    #   which was the failure mode of llama-3.3-70b-versatile
+    GROUND_TRUTH_MODEL = "qwen/qwen3-32b"  # Groq preview model
     GROUND_TRUTH_TEMPERATURE = 0
 
 

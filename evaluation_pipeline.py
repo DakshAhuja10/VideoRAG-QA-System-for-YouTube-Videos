@@ -130,10 +130,16 @@ def log_evaluation(question, answer, reference, scores, confidence):
 
 
 REFERENCE_PROMPT = """
-Answer the question using ONLY the context.
-If the answer is not explicitly present, say "I don't know".
+You are a reference answer generator for a RAG evaluation system.
 
-Return ONLY valid JSON.
+Using ONLY the context provided below, write a concise, factually grounded answer
+to the question. Synthesize information from the context — do not require the exact
+phrase to appear verbatim; it is enough if the context supports the answer.
+
+If the context contains absolutely no information relevant to the question,
+respond with exactly: {{"answer": "I don't know"}}
+
+Return ONLY valid JSON with no preamble or explanation.
 
 Format:
 {{"answer": "..."}}
@@ -145,8 +151,8 @@ Question:
 {question}
 """
 
-# ground_truth_llm (llama-3.3-70b-versatile) generates the reference.
-# llm (openai/gpt-oss-120b) judges via RAGAS — different models, no circularity.
+# ground_truth_llm (qwen/qwen3-32b) generates the reference.
+# llm (openai/gpt-oss-120b) judges via RAGAS — different model families, no circularity.
 def generate_reference_answer(question, context):
     ground_truth_prompt = REFERENCE_PROMPT.format(question=question, context=context)
     response = ground_truth_llm.invoke(ground_truth_prompt).content
