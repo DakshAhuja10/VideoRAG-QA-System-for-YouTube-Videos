@@ -1,8 +1,122 @@
 import os
+import re
+import tempfile
+from types import SimpleNamespace
+
 import pandas as pd
 from youtube_meta_data import get_video_info, append_data_to_csv
 from transcript_generate import ytt_api
 from config import VIDEOS_CSV, TRANSCRIPT_CSV, VectorStoreConfig, EmbeddingConfig
+
+
+# ── yt-dlp transcript fallback ────────────────────────────────────────────────
+# youtube-transcript-api is blocked by YouTube on most cloud provider IPs
+# (Streamlit Cloud, AWS, GCP, Azure, etc.).  yt-dlp downloads the subtitle
+# file directly using a browser-like request, which avoids this block.
+
+def _parse_vtt(content: str) -> list:
+    """
+    Parse a WebVTT subtitle file downloaded by yt-dlp into a list of
+    SimpleNamespace(text, start, duration) objects – the same contract as
+    youtube-transcript-api snippets.
+
+    Handles yt-dlp auto-caption quirks:
+    - Strips all HTML tags  (<c>, </c>, timestamp tags, etc.)
+    - Deduplicates repeated context lines (auto-captions echo the previous
+      line on each new cue)
+    - Skips empty cues
+    """
+    # Remove header block
+    content = re.sub(r'^WEBVTT.*?\n\n', '', content, flags=re.DOTALL)
+    content = re.sub(r'NOTE\s.*?\n\n', '', content, flags=re.DOTALL | re.MULTILINE)
+
+    blocks = re.split(r'\n{2,}', content.strip())
+    segments = []
+    seen_texts: set = set()
+
+    for block in blocks:
+        lines = block.strip().splitlines()
+        timing_line = None
+        text_lines = []
+
+        for line in lines:
+            if '-->' in line:
+                timing_line = line
+            elif timing_line and line.strip():
+                text_lines.append(line)
+
+        if not timing_line or not text_lines:
+            continue
+
+        m = re.match(
+            r'(\d+):(\d+):(\d+\.\d+)\s*-->\s*(\d+):(\d+):(\d+\.\d+)',
+            timing_line,
+        )
+        if not m:
+            continue
+
+        h1, m1, s1, h2, m2, s2 = m.groups()
+        start    = int(h1) * 3600 + int(m1) * 60 + float(s1)
+        end      = int(h2) * 3600 + int(m2) * 60 + float(s2)
+        duration = max(end - start, 0.0)
+
+        raw = " ".join(text_lines)
+        text = re.sub(r'<[^>]+>', '', raw)      # strip all HTML/XML tags
+        text = re.sub(r'\s+', ' ', text).strip()
+
+        if not text or text in seen_texts:
+            continue
+        seen_texts.add(text)
+
+        segments.append(SimpleNamespace(text=text, start=start, duration=duration))
+
+    return segments
+
+
+def _fetch_transcript_ytdlp(video_id: str, video_url: str) -> list:
+    """
+    Download auto-generated or manual English subtitles using yt-dlp and
+    return them in the same format as youtube-transcript-api.
+
+    yt-dlp spoofs a real browser User-Agent and uses different request
+    patterns, so it succeeds on cloud IPs where youtube-transcript-api fails.
+    """
+    import yt_dlp
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        ydl_opts = {
+            "skip_download": True,
+            "writesubtitles": True,       # manual captions
+            "writeautomaticsub": True,    # auto-generated captions
+            "subtitleslangs": ["en", "en-US", "en-GB"],
+            "subtitlesformat": "vtt",
+            "outtmpl": os.path.join(tmpdir, "%(id)s.%(ext)s"),
+            "quiet": True,
+            "no_warnings": True,
+        }
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([video_url])
+
+        vtt_file = next(
+            (os.path.join(tmpdir, f) for f in os.listdir(tmpdir) if f.endswith(".vtt")),
+            None,
+        )
+
+        if not vtt_file:
+            raise FileNotFoundError(
+                "yt-dlp could not download subtitles. "
+                "The video may have no English captions, or yt-dlp is also being blocked."
+            )
+
+        with open(vtt_file, "r", encoding="utf-8") as fh:
+            content = fh.read()
+
+    segments = _parse_vtt(content)
+    if not segments:
+        raise ValueError("Subtitle file was downloaded but contained no parseable text.")
+    return segments
+
 
 def ingest_video(video_url, progress_callback=None):
     """
@@ -35,10 +149,29 @@ def ingest_video(video_url, progress_callback=None):
     if progress_callback: progress_callback(20, "Fetching transcript...")
 
     # 2. Fetch Transcript
+    # Try youtube-transcript-api first (fast, clean output).
+    # On Streamlit Cloud and other cloud IPs, YouTube blocks its requests.
+    # yt-dlp uses browser-like requests and succeeds in most cases where
+    # youtube-transcript-api is blocked.
+    transcript = None
     try:
         transcript = ytt_api.fetch(video_id, languages=["en"])
-    except Exception as e:
-        return False, f"Error fetching transcript: {str(e)}"
+        if progress_callback: progress_callback(35, "Transcript fetched via youtube-transcript-api.")
+    except Exception as primary_err:
+        if progress_callback:
+            progress_callback(25, "youtube-transcript-api blocked — trying yt-dlp fallback...")
+        try:
+            transcript = _fetch_transcript_ytdlp(video_id, video_url)
+            if progress_callback:
+                progress_callback(35, f"Transcript fetched via yt-dlp ({len(transcript)} segments).")
+        except Exception as fallback_err:
+            return False, (
+                f"Could not fetch transcript using either method.\n\n"
+                f"**Primary (youtube-transcript-api):** {primary_err}\n\n"
+                f"**Fallback (yt-dlp):** {fallback_err}\n\n"
+                "YouTube blocks most cloud provider IPs from fetching transcripts. "
+                "This feature works reliably when running the app locally."
+            )
     
     # Check if transcript already exists
     processed = False
