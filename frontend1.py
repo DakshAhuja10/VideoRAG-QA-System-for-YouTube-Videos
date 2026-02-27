@@ -9,7 +9,7 @@ import subprocess
 from pathlib import Path
 
 
-from retriever_pipeline2 import ask, ask_stream
+from retriever_pipeline2 import ask, ask_stream, ask_stream_broad
 from evaluation_pipeline import evaluate_answer
 from config import (
     PIPER_EXE,
@@ -505,8 +505,8 @@ if page == "💬 Ask a Question":
                 full_answer = ""
                 retrieved_contexts = []
                 
-                with st.spinner("Retrying with broader retrieval..."):
-                    for chunk in ask_stream(st.session_state.question):
+                with st.spinner("Retrying with broader retrieval (MMR ×2 candidates, BM25 ×2 docs, reranker top-15)..."):
+                    for chunk in ask_stream_broad(st.session_state.question):
                         if chunk["type"] == "token":
                             full_answer += chunk["content"]
                             answer_placeholder.markdown(f"{full_answer}▌", unsafe_allow_html=True)

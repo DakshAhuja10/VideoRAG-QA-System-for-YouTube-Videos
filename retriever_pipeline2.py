@@ -127,10 +127,8 @@ bm25            = _load_bm25()
 
 
 
-#retrieved list contains list of all 3 retrievers
-#and then we loop over documents retrieved by each retriever
-#we use hash to remove any duplicated results
-#and finally returns all the list of unique Document objects
+# ── Retrieval helpers ────────────────────────────────────────────────────────
+
 # Deduplicate documents based on content hash
 def combine_results(*retrieved_lists):
     unique_docs = []
@@ -146,6 +144,7 @@ def combine_results(*retrieved_lists):
 
 
 def hybrid_retrieve(query):
+    """Standard retrieval used for first-pass answers."""
     # Phase 1: Broad Retrieval (Greater k to allow re-ranker to find the best)
     r1 = mmr_retriever.invoke(query)  # Fetches based on relevance + diversity
     r2 = multi_retriever.invoke(query) # Fetches based on LLM query expansions
@@ -172,6 +171,59 @@ def hybrid_retrieve(query):
 
     # Return top N most relevant after re-ranking (from config)
     return combined[:RetrievalConfig.RERANK_TOP_N]
+
+
+def hybrid_retrieve_broad(query):
+    """
+    Wider retrieval used on retry when the first-pass confidence is low.
+
+    Differences vs hybrid_retrieve:
+    - MMR: fetches 40 candidates (vs 20) and returns top 12 (vs 6).
+      A larger candidate pool forces MMR to explore more of the vector space,
+      surfacing chunks that a shallow search misses.
+    - MultiQuery: reuses the same retriever; because the underlying LLM is
+      non-deterministic it will generate different query expansions, hitting
+      different parts of the index.
+    - BM25: returns 12 docs (vs 6), broadening keyword coverage.
+    - Reranker: keeps top 15 after scoring (vs 10), giving the LLM a richer
+      context window to find an explicit answer in.
+    """
+    # Create a wider MMR retriever on-the-fly using the cached vector_store.
+    # This is cheap — it's just a config wrapper over the already-loaded Chroma
+    # connection; no model weights are reloaded.
+    mmr_broad = vector_store.as_retriever(
+        search_type="mmr",
+        search_kwargs={"k": 12, "fetch_k": 40},
+    )
+    r1 = mmr_broad.invoke(query)
+
+    # MultiQuery with a wider per-sub-query k
+    mq_broad = vector_store.as_retriever(search_kwargs={"k": 10})
+    mq_llm = ChatGoogleGenerativeAI(model=LLMConfig.MULTIQUERY_MODEL)
+    multi_broad = MultiQueryRetriever.from_llm(retriever=mq_broad, llm=mq_llm)
+    r2 = multi_broad.invoke(query)
+
+    results = [r1, r2]
+
+    if bm25:
+        original_k = bm25.k
+        bm25.k = 12          # temporarily widen BM25
+        r3 = bm25.invoke(query)
+        bm25.k = original_k  # restore so normal retrieval is unaffected
+        results.append(r3)
+
+    combined = combine_results(*results)
+
+    # Re-rank and keep a larger top-N
+    if combined:
+        pairs = [[query, doc.page_content] for doc in combined]
+        scores = rerank_model.predict(pairs)
+        for i, doc in enumerate(combined):
+            doc.metadata["rerank_score"] = float(scores[i])
+        combined.sort(key=lambda x: x.metadata["rerank_score"], reverse=True)
+
+    # Keep top 15 (vs default 10) to give the LLM more grounding material
+    return combined[:15]
 
 
 #here since the retrieved context is in the form of document object we make this into a structured format in the form of list of dictionary which we can then pass into the llm 
@@ -291,44 +343,57 @@ def ask(question: str):
 
 def ask_stream(question: str):
     """
-    Streaming version - yields tokens as they are generated with metrics tracking
-    Returns a generator that yields:
+    Streaming version — standard first-pass retrieval.
+    Yields:
     - {"type": "token", "content": <token>} for each token
     - {"type": "done", "retrieved_contexts": [...], "query_id": ...} when complete
     """
     query_id = str(uuid.uuid4())
     import time
     
-    # Track retrieval latency
-    # with track_latency("retrieval", query_id=query_id):
     docs = hybrid_retrieve(question)
     structured_docs = format_docs_structured(docs)
     prompt_context = docs_to_prompt_context(structured_docs)
     final_prompt = rank_prompt.format(context=prompt_context, question=question)
     
-    # Track streaming LLM generation
     start_time = time.time()
-    token_count = 0
     response_text = ""
     
-    # Stream tokens from the LLM
     for chunk in llm.stream(final_prompt):
         if chunk.content:
-            token_count += 1
             response_text += chunk.content
             yield {"type": "token", "content": chunk.content}
     
-    # Log streaming latency and token usage
-    duration_ms = (time.time() - start_time) * 1000
-    estimated_tokens = (len(final_prompt) + len(response_text)) // 4
-    
-    # with track_latency("llm_streaming", query_id=query_id):
-    #     # This will log 0ms since we already measured, but records the event
-    #     pass
-    
-    # track_api_call("groq", estimated_tokens, query_id=query_id)
-    
-    # Send the retrieved contexts at the end
+    yield {
+        "type": "done",
+        "retrieved_contexts": [d["text"] for d in structured_docs],
+        "query_id": query_id,
+    }
+
+
+def ask_stream_broad(question: str):
+    """
+    Streaming version using hybrid_retrieve_broad — used on retry.
+    Fetches from a larger candidate pool (MMR k=12/fetch_k=40, BM25 k=12,
+    MultiQuery k=10 per sub-query, reranker top-15) so the LLM receives
+    genuinely different and more extensive context than the first pass.
+    Same yield contract as ask_stream.
+    """
+    query_id = str(uuid.uuid4())
+    import time
+
+    docs = hybrid_retrieve_broad(question)
+    structured_docs = format_docs_structured(docs)
+    prompt_context = docs_to_prompt_context(structured_docs)
+    final_prompt = rank_prompt.format(context=prompt_context, question=question)
+
+    response_text = ""
+
+    for chunk in llm.stream(final_prompt):
+        if chunk.content:
+            response_text += chunk.content
+            yield {"type": "token", "content": chunk.content}
+
     yield {
         "type": "done",
         "retrieved_contexts": [d["text"] for d in structured_docs],
