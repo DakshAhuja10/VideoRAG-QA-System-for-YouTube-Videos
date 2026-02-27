@@ -21,6 +21,7 @@ from config import (
     TTS_AUDIO_BITRATE,
     TTS_TEMP_WAV,
     TTS_OUTPUT_FILE,
+    validate_config,
 )
 # from metrics_tracker import (
 #     track_latency,
@@ -87,6 +88,15 @@ IS_STREAMLIT_CLOUD = (
     os.environ.get("SF_PARTNER") == "streamlit"
     or os.environ.get("HOSTNAME") == "streamlit"
 )
+
+# Validate required configuration at startup.
+# Shows a clear error and stops the app if API keys are missing,
+# instead of crashing mid-request with a raw API traceback.
+try:
+    validate_config()
+except ValueError as e:
+    st.error(f"**Configuration error — app cannot start:**\n\n{e}")
+    st.stop()
 
 if IS_STREAMLIT_CLOUD:
     logger.info("Running on Streamlit Cloud - using gTTS")
@@ -289,43 +299,52 @@ if page == "💬 Ask a Question":
     """, unsafe_allow_html=True)
     
     # Dynamic Ingestion Section
-    with st.expander("➕ Add New Video to Knowledge Base"):
-        st.markdown("Enter a YouTube URL to fetch its transcript and add it to the RAG knowledge base.")
-        
-        # Use a dynamic key to allow clearing
-        if "url_input_key" not in st.session_state:
-            st.session_state.url_input_key = 0
-            
-        input_url = st.text_input("YouTube Video URL", placeholder="https://www.youtube.com/watch?v=...", key=f"input_url_{st.session_state.url_input_key}")
-        if st.button("Ingest Video"):
-            if input_url:
-                if "youtube.com" in input_url or "youtu.be" in input_url:
-                    with st.status("Ingesting video content...", expanded=True) as status:
-                        from ingestion_pipeline import ingest_video
-                        progress_bar = st.progress(0)
-                        
-                        def update_progress(pct, msg):
-                            progress_bar.progress(pct/100)
-                            # Only write major steps to avoid cluttering the UI
-                            if not msg.startswith("Generating embeddings... ("):
-                                st.write(f"**{pct}%**: {msg}")
-                        
-                        success, message = ingest_video(input_url, progress_callback=update_progress)
-                        if success:
-                            if "already processed" in message:
-                                status.update(label="✅ Video Already Exists!", state="complete", expanded=False)
-                                st.info(message)
+    # YouTube blocks transcript requests from cloud provider IPs (AWS, GCP, etc.)
+    # so this feature is only available when running locally.
+    if IS_STREAMLIT_CLOUD:
+        with st.expander("➕ Add New Video to Knowledge Base (Local Only)"):
+            st.info(
+                "⚠️ **This feature is disabled on Streamlit Cloud.**\n\n"
+                "YouTube blocks transcript fetching from cloud provider IPs, so ingestion "
+                "is not possible in this environment.\n\n"
+                "To add new videos, run the app **locally** and ingest them there — "
+                "the updated `chroma_db/` and CSV files can then be committed and pushed "
+                "to GitHub so the cloud deployment picks them up automatically."
+            )
+    else:
+        with st.expander("➕ Add New Video to Knowledge Base"):
+            st.markdown("Enter a YouTube URL to fetch its transcript and add it to the RAG knowledge base.")
+
+            input_url = st.text_input("YouTube Video URL", placeholder="https://www.youtube.com/watch?v=...", key="input_url")
+            if st.button("Ingest Video"):
+                if input_url:
+                    if "youtube.com" in input_url or "youtu.be" in input_url:
+                        with st.status("Ingesting video content...", expanded=True) as status:
+                            from ingestion_pipeline import ingest_video
+                            progress_bar = st.progress(0)
+                            
+                            def update_progress(pct, msg):
+                                progress_bar.progress(pct/100)
+                                # Only write major steps to avoid cluttering the UI
+                                if not msg.startswith("Generating embeddings... ("):
+                                    st.write(f"**{pct}%**: {msg}")
+                            
+                            success, message = ingest_video(input_url, progress_callback=update_progress)
+                            if success:
+                                if "already processed" in message:
+                                    status.update(label="✅ Video Already Exists!", state="complete", expanded=False)
+                                    st.info(message)
+                                else:
+                                    status.update(label="✅ Ingestion Complete!", state="complete", expanded=False)
+                                    st.success(message)
+                                    st.info("You can now ask questions about this video.")
                             else:
-                                status.update(label="✅ Ingestion Complete!", state="complete", expanded=False)
-                                st.success(message)
-                                st.info("You can now ask questions about this video.")
-                        else:
-                            status.update(label="❌ Ingestion Failed", state="error", expanded=True)
-                            st.error(message)
+                                status.update(label="❌ Ingestion Failed", state="error", expanded=True)
+                                st.error(message)
+                    else:
+                        st.error("Please enter a valid YouTube URL.")
                 else:
-                    st.error("Please enter a valid YouTube URL.")
-            else:
-                st.warning("Please enter a URL first.")
+                    st.warning("Please enter a URL first.")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -352,14 +371,12 @@ if page == "💬 Ask a Question":
     #clear
     if clear_clicked:
         for k in default_state:
-            if k == "input_url":
-                continue # Skip input_url to avoid StreamlitAPIException
             st.session_state[k] = default_state[k]
-        
-        # Increment the key to force Streamlit to render a fresh, empty text input
-        if "url_input_key" in st.session_state:
-            st.session_state.url_input_key += 1
-            
+
+        # Correct Streamlit pattern: remove the widget key from session_state
+        # so it renders fresh on rerun, instead of incrementing a counter key.
+        st.session_state.pop("input_url", None)
+
         if os.path.exists("answer.mp3"):
             os.remove("answer.mp3")
         st.rerun()

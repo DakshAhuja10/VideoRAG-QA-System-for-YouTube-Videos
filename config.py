@@ -127,10 +127,17 @@ class LLMConfig:
     MULTIQUERY_MODEL = "gemini-2.5-flash"  # Google Gemini
     # Rationale: Fast and cost-effective for query expansion
     
-    # Evaluation LLM
+    # Evaluation LLM (RAGAS judge)
     EVAL_MODEL = "openai/gpt-oss-120b"  # Groq model for RAGAS
     EVAL_TEMPERATURE = 0  # Deterministic evaluation
     # Rationale: Consistent evaluation scores across runs
+
+    # Ground Truth LLM (reference answer generation)
+    # MUST be a different model from EVAL_MODEL to avoid circular evaluation:
+    # llama-3.3-70b-versatile is a strong general model, completely separate
+    # from the openai/gpt-oss-120b judge and the llama-3.1-8b-instant answer model.
+    GROUND_TRUTH_MODEL = "llama-3.3-70b-versatile"  # Groq model
+    GROUND_TRUTH_TEMPERATURE = 0
 
 
 # ============================================================================
@@ -231,7 +238,7 @@ class VectorStoreConfig:
 # API KEYS (from environment variables)
 # ============================================================================
 
-# These should be set in .env file
+# These should be set in .env file or Streamlit Cloud Secrets
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 

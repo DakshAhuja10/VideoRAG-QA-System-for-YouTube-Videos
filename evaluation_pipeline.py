@@ -38,6 +38,16 @@ from config import (
     get_confidence_weights,
 )
 
+# ── Why two separate LLM instances? ──────────────────────────────────────────
+# Using the same model for both ground-truth generation and RAGAS evaluation
+# creates circular scoring: the judge trivially rewards its own phrasing.
+#
+#   ground_truth_llm  →  llama-3.3-70b-versatile  (writes the reference answer)
+#   llm (eval)        →  openai/gpt-oss-120b       (judges RAG answer vs reference)
+#
+# These are different model families on Groq, so the reference and the judge
+# have genuinely independent perspectives.
+
 # RAGAS configuration
 PydanticPrompt.default_n = EvaluationConfig.RAGAS_DEFAULT_N
 
@@ -63,8 +73,18 @@ def _load_eval_llm():
     )
 
 
-embedding_model = _load_eval_embeddings()
-llm             = _load_eval_llm()
+@st.cache_resource(show_spinner=False)
+def _load_ground_truth_llm():
+    # Deliberately separate from _load_eval_llm — different model family
+    return ChatGroq(
+        model=LLMConfig.GROUND_TRUTH_MODEL,
+        temperature=LLMConfig.GROUND_TRUTH_TEMPERATURE,
+    )
+
+
+embedding_model   = _load_eval_embeddings()
+llm               = _load_eval_llm()        # RAGAS judge
+ground_truth_llm  = _load_ground_truth_llm()  # reference answer writer
 
 
 def extract_json(text: str):
@@ -125,14 +145,15 @@ Question:
 {question}
 """
 
-#here we are using the llm to generate the reference answer or the ground truth
+# ground_truth_llm (llama-3.3-70b-versatile) generates the reference.
+# llm (openai/gpt-oss-120b) judges via RAGAS — different models, no circularity.
 def generate_reference_answer(question, context):
-    ground_truth_prompt=REFERENCE_PROMPT.format(question=question,context=context)
-    response = llm.invoke(ground_truth_prompt).content
+    ground_truth_prompt = REFERENCE_PROMPT.format(question=question, context=context)
+    response = ground_truth_llm.invoke(ground_truth_prompt).content
 
     try:
         return extract_json(response)["answer"]
-    except Exception as e:
+    except Exception:
         return "I don't know"
 
 
