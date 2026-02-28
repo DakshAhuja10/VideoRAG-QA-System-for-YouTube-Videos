@@ -23,6 +23,31 @@ except Exception:
     pass  # not on Streamlit Cloud, or no secrets defined — silently ignore
 # ────────────────────────────────────────────────────────────────────────────
 
+# ── Startup diagnostics (visible in Cloud logs via 'Manage app') ────────────
+import logging as _diag_logging
+_diag = _diag_logging.getLogger("startup")
+_diag.setLevel(_diag_logging.INFO)
+try:
+    from config import CHROMA_DB_DIR, IS_STREAMLIT_CLOUD
+    _diag.info(f"IS_STREAMLIT_CLOUD = {IS_STREAMLIT_CLOUD}")
+    _diag.info(f"CHROMA_DB_DIR      = {CHROMA_DB_DIR}")
+    _diag.info(f"Dir exists         = {CHROMA_DB_DIR.exists()}")
+    if CHROMA_DB_DIR.exists():
+        for _f in sorted(CHROMA_DB_DIR.rglob('*')):
+            if _f.is_file():
+                _diag.info(f"  {_f.relative_to(CHROMA_DB_DIR)}  ({_f.stat().st_size:,} bytes)")
+    # Quick chromadb sanity check
+    import chromadb as _cb
+    _test_client = _cb.PersistentClient(path=str(CHROMA_DB_DIR))
+    _cols = _test_client.list_collections()
+    _diag.info(f"Collections: {[c.name for c in _cols]}")
+    for _c in _cols:
+        _diag.info(f"  {_c.name}: {_c.count()} documents")
+    del _test_client, _cols, _c
+except Exception as _e:
+    _diag.error(f"Startup diagnostic failed: {_e}")
+# ────────────────────────────────────────────────────────────────────────────
+
 from architecture.retrieval.retriever_pipeline2 import ask, ask_stream, ask_stream_broad
 from architecture.evaluation.evaluation_pipeline import evaluate_answer
 from config import (

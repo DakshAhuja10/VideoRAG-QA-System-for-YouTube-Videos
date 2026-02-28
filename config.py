@@ -3,11 +3,19 @@ Configuration file for VideoRAG system.
 All configurable parameters are centralized here with explanations.
 """
 import os
+import shutil
 from pathlib import Path
 from dotenv import load_dotenv
 
 # Base directory - automatically detected
 BASE_DIR = Path(__file__).parent.resolve()
+
+# Detect Streamlit Cloud (Linux container with specific env vars)
+IS_STREAMLIT_CLOUD = (
+    os.environ.get("SF_PARTNER") == "streamlit"
+    or os.environ.get("HOSTNAME") == "streamlit"
+    or os.path.exists("/mount/src")
+)
 
 # Load .env from parent directory (D:\langchain_models\.env)
 # This allows sharing the same .env across multiple projects
@@ -25,9 +33,26 @@ else:
 # ============================================================================
 
 # Data directories
-CHROMA_DB_DIR = BASE_DIR / "chroma_db"
+_REPO_CHROMA_DB_DIR = BASE_DIR / "chroma_db"
 LOGS_DIR = BASE_DIR / "logs"
 ASSETS_DIR = BASE_DIR / "assets"
+
+# On Streamlit Cloud, chromadb's Rust engine needs full read/write access
+# (WAL journal, shared-memory files, segment locks).  The repo mount may not
+# guarantee this, so we copy the pre-built DB to /tmp/ on every cold start.
+if IS_STREAMLIT_CLOUD:
+    _CLOUD_CHROMA_DIR = Path("/tmp/chroma_db")
+    if not (_CLOUD_CHROMA_DIR / "chroma.sqlite3").exists():
+        print(f"[config] Copying chroma_db to {_CLOUD_CHROMA_DIR} for Cloud ...")
+        if _CLOUD_CHROMA_DIR.exists():
+            shutil.rmtree(_CLOUD_CHROMA_DIR)
+        shutil.copytree(str(_REPO_CHROMA_DB_DIR), str(_CLOUD_CHROMA_DIR))
+        print(f"[config] Copy complete – {sum(1 for _ in _CLOUD_CHROMA_DIR.rglob('*'))} files")
+    else:
+        print(f"[config] Cloud chroma_db already at {_CLOUD_CHROMA_DIR}")
+    CHROMA_DB_DIR = _CLOUD_CHROMA_DIR
+else:
+    CHROMA_DB_DIR = _REPO_CHROMA_DB_DIR
 
 # Ensure directories exist
 LOGS_DIR.mkdir(exist_ok=True)
