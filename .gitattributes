@@ -1,0 +1,16 @@
+﻿# Force binary treatment for all ChromaDB files - NEVER apply CRLF/LF conversion
+chroma_db/**          binary
+*.sqlite3             binary
+*.sqlite-journal      binary
+*.bin                 binary
+*.pickle              binary
+*.pkl                 binary
+*.db                  binary
+
+# Python/text files - normalize line endings
+*.py                  text eol=lf
+*.txt                 text eol=lf
+*.md                  text eol=lf
+*.toml                text eol=lf
+*.json                text eol=lf
+*.csv                 text eol=lf

@@ -8,6 +8,20 @@ import threading
 import subprocess
 from pathlib import Path
 
+# ── Inject Streamlit Cloud secrets into os.environ ──────────────────────────
+# Must happen BEFORE importing any module that calls os.getenv() at import
+# time (e.g. retriever_pipeline2, config.py).
+# Locally, keys come from .env / the parent .env via load_dotenv().
+# On Streamlit Cloud, keys come from the Secrets dashboard and are exposed
+# through st.secrets — push them into os.environ so every downstream
+# os.getenv() call just works without any code changes.
+try:
+    for _k, _v in st.secrets.items():
+        if isinstance(_v, str):          # only top-level string secrets
+            os.environ.setdefault(_k, _v)
+except Exception:
+    pass  # not on Streamlit Cloud, or no secrets defined — silently ignore
+# ────────────────────────────────────────────────────────────────────────────
 
 from architecture.retrieval.retriever_pipeline2 import ask, ask_stream, ask_stream_broad
 from architecture.evaluation.evaluation_pipeline import evaluate_answer
