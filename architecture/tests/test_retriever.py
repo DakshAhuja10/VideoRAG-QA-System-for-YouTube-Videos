@@ -1,5 +1,5 @@
 """
-Test script for retriever_pipeline2.py — runs ask() on diverse query types
+Test script for retriever_pipeline.py — runs ask() on diverse query types
 outside of Streamlit by patching st.cache_resource before import.
 
 Categories tested:
@@ -27,7 +27,7 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
-from architecture.retrieval.retriever_pipeline2 import ask   # noqa: E402
+from architecture.retrieval.retriever_pipeline import ask   # noqa: E402
 
 
 # ── Test queries ──────────────────────────────────────────────────────────────

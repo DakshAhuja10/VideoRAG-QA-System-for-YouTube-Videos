@@ -10,7 +10,7 @@ from pathlib import Path
 
 # ── Inject Streamlit Cloud secrets into os.environ ──────────────────────────
 # Must happen BEFORE importing any module that calls os.getenv() at import
-# time (e.g. retriever_pipeline2, config.py).
+# time (e.g. retriever_pipeline, config.py).
 # Locally, keys come from .env / the parent .env via load_dotenv().
 # On Streamlit Cloud, keys come from the Secrets dashboard and are exposed
 # through st.secrets — push them into os.environ so every downstream
@@ -48,7 +48,7 @@ except Exception as _e:
     _diag.error(f"Startup diagnostic failed: {_e}")
 # ────────────────────────────────────────────────────────────────────────────
 
-from architecture.retrieval.retriever_pipeline2 import ask, ask_stream, ask_stream_broad
+from architecture.retrieval.retriever_pipeline import ask, ask_stream, ask_stream_broad
 from architecture.evaluation.evaluation_pipeline import evaluate_answer
 from config import (
     PIPER_EXE,
@@ -481,7 +481,7 @@ if page == "💬 Ask a Question":
         st.session_state.query_id = query_id  # Store for metrics tracking
         # Detect "I don't know" — triggers web search fallback option.
         # Matched against the EXACT phrases enforced by the LLM prompt in
-        # retriever_pipeline2.py so edge-cases like "I do not know" or a
+        # retriever_pipeline.py so edge-cases like "I do not know" or a
         # partial phrase don't accidentally suppress the Evaluate button.
         _DONT_KNOW_PHRASES = [
             "i don't know. the transcripts do not contain the answer",       # old prompt phrase

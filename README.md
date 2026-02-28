@@ -125,14 +125,14 @@ When the system cannot answer from its transcript knowledge base, an integrated 
 
 `
                     ┌─────────────┐
-                    │ frontend1.py│  ◄── Streamlit entry point
+                    │   app.py    │  ◄── Streamlit entry point
                     └──────┬──────┘
                            │ imports
               ┌────────────┼────────────┐
               ▼            ▼            ▼
       ┌───────────┐ ┌──────────┐ ┌──────────┐
       │ retriever  │ │evaluation│ │web_search│
-      │ pipeline2  │ │ pipeline │ │          │
+      │ pipeline   │ │ pipeline │ │          │
       └──────┬─────┘ └────┬─────┘ └────┬─────┘
              │            │            │
              ▼            ▼            │
@@ -233,7 +233,7 @@ This is **by design** — the system refuses to answer from its own parametric k
 LexiChat/
 │
 ├── config.py                    ← Central config: paths, model names, thresholds, toggles
-├── frontend1.py                 ← Streamlit UI — the application entry point
+├── app.py                       ← Streamlit UI — the application entry point
 ├── requirements.txt             ← Python dependencies
 ├── .env.example                 ← Template for required API keys
 ├── .gitattributes               ← Marks chroma_db files as binary (prevents corruption)
@@ -253,7 +253,7 @@ LexiChat/
 │   │   └── vector_store_chroma.py   ← Build / incrementally update ChromaDB collection
 │   │
 │   ├── retrieval/               ← Hybrid retrieval + query decomposition + answer generation
-│   │   └── retriever_pipeline2.py   ← MMR + MultiQuery + BM25 + CrossEncoder + Groq LLM
+│   │   └── retriever_pipeline.py    ← MMR + MultiQuery + BM25 + CrossEncoder + Groq LLM
 │   │
 │   ├── evaluation/              ← RAG quality measurement
 │   │   ├── evaluation_pipeline.py   ← RAGAS runner, confidence scoring, CSV logger
@@ -347,7 +347,7 @@ GROQ_API_KEY=your_groq_api_key_here
 ### Step 4: Run the Application
 
 `ash
-streamlit run frontend1.py
+streamlit run app.py
 `
 
 Opens at **http://localhost:8501**. You can immediately ask questions about the 19 indexed videos.
@@ -385,7 +385,7 @@ Only new chunks get embedded (SHA-256 dedup). Existing chunks are skipped.
 ### 4. Restart the application
 
 `ash
-streamlit run frontend1.py
+streamlit run app.py
 `
 
 ---
