@@ -36,8 +36,3 @@ answer.mp3
 # (experiments, drafts, internal docs)
 # ======================
 ignore/
-
-# ======================
-# ChromaDB vector store
-# ======================
-chroma_db/
