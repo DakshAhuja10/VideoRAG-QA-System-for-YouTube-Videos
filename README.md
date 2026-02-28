@@ -1,6 +1,6 @@
-﻿# 🎥 LexiChat — YouTube Video RAG System
+﻿# 🎥 VideoRAG — A Relaibility Focused YouTube QA System
 
-LexiChat is an **end-to-end Retrieval-Augmented Generation (RAG) system** for **grounded, timestamped question answering over YouTube video transcripts**.
+VideoRAG is an **end-to-end Retrieval-Augmented Generation (RAG) system** for **grounded, timestamped question answering over YouTube video transcripts**.
 
 It ingests YouTube playlists, extracts transcripts with timestamps, builds a persistent vector database, and retrieves relevant context using a **hybrid retrieval pipeline** (MMR + MultiQuery + BM25) with **cross-encoder reranking**. Answers are strictly grounded to transcript content and come with **clickable YouTube timestamps**.
 
@@ -10,10 +10,9 @@ When the system cannot answer from its transcript knowledge base, an integrated 
 
 ## 🔗 Live Demo
 
-👉 **[Try LexiChat on Streamlit Cloud](https://videorag-app-system-for-youtube-videos-3vpsxvnappai2vxtpjgon3.streamlit.app/)**
+👉 **[Try on Streamlit Cloud](https://videorag-app-system-for-youtube-videos-2xmznahleadcbv4sdn5mzy.streamlit.app/)**
 
 > ⚠️ Deployed on Streamlit Cloud (shared infrastructure).
-> **Answer generation** is fast (~2–3 seconds).
 > **RAG evaluation** takes ~2–2.5 minutes due to multiple sequential LLM calls on shared, rate-limited infrastructure.
 
 ---
@@ -22,7 +21,7 @@ When the system cannot answer from its transcript knowledge base, an integrated 
 
 ### High-Level Data Flow
 
-`
+```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                        INGESTION PIPELINE (offline)                     │
 │                                                                         │
@@ -30,10 +29,10 @@ When the system cannot answer from its transcript knowledge base, an integrated 
 │        │                                                                │
 │        ▼                                                                │
 │  youtube_meta_data.py ──► yt-dlp: titles, channels, durations           │
-│        │                  └──► architecture/data/videos.csv              │
+│        │                  └──►videos.csv                                │
 │        ▼                                                                │
 │  transcript_generate.py ──► youtube-transcript-api (yt-dlp fallback)    │
-│        │                    └──► video_with_meta_data_and_transcript.csv │
+│        │                    └──► video_with_meta_data_and_transcript.csv│
 │        ▼                                                                │
 │  doc_loader.py ──► CSV → LangChain Documents + SHA-256 hash per chunk   │
 │        │                                                                │
@@ -54,21 +53,21 @@ When the system cannot answer from its transcript knowledge base, an integrated 
 │  ┌─────────────────────────────────────────────┐                        │
 │  │  Per sub-question, 3 parallel retrievers:   │                        │
 │  │                                             │                        │
-│  │  ┌──────────┐ ┌───────────┐ ┌───────────┐  │                        │
-│  │  │ MMR      │ │MultiQuery │ │  BM25     │  │                        │
-│  │  │ k=6      │ │Gemini 2.5 │ │  k=6      │  │                        │
-│  │  │fetch_k=20│ │Flash      │ │  keyword  │  │                        │
-│  │  │relevance │ │query      │ │  matching  │  │                        │
-│  │  │+diversity│ │expansion  │ │           │  │                        │
-│  │  └────┬─────┘ └─────┬─────┘ └─────┬─────┘  │                        │
+│  │  ┌──────────┐ ┌───────────┐ ┌───────────┐   │                        │                  
+│  │  │ MMR      │ │MultiQuery │ │  BM25     │   │                        │      
+│  │  │ k=6      │ │Gemini 2.5 │ │  k=6      │   │                        │
+│  │  │fetch_k=20│ │Flash      │ │  keyword  │   │                        │
+│  │  │relevance │ │query      │ │  matching │   │                        │
+│  │  │+diversity│ │expansion  │ │           │   │                        │
+│  │  └────┬─────┘ └─────┬─────┘ └─────┬─────┘   │                        │
 │  │       └──────────────┼────────────┘         │                        │
-│  │                      ▼                       │                        │
-│  │        combine_results() — deduplicate       │                        │
-│  │                      ▼                       │                        │
-│  │    CrossEncoder Reranker (ms-marco-MiniLM)   │                        │
-│  │    Score each chunk against its sub-question  │                        │
-│  │                      ▼                       │                        │
-│  │            Top-N most relevant chunks         │                        │
+│  │                      ▼                      │                        │
+│  │        combine_results() — deduplicate      │                        │
+│  │                      ▼                      │                        │
+│  │    CrossEncoder Reranker (ms-marco-MiniLM)  │                        │
+│  │    Score each chunk against its sub-question│                        │
+│  │                      ▼                      │                        │
+│  │            Top-N most relevant chunks       │                        │
 │  └─────────────────────────────────────────────┘                        │
 │        │                                                                │
 │        ▼                                                                │
@@ -77,7 +76,7 @@ When the system cannot answer from its transcript knowledge base, an integrated 
 │   YES (relevant)              NO (irrelevant)                           │
 │        │                            │                                   │
 │        ▼                            ▼                                   │
-│  Groq LLM (llama-3.1-8b)    "I don't know. The transcripts             │
+│  Groq LLM (llama-3.1-8b)    "I don't know. The transcripts              │
 │  Strict grounded prompt       do not contain information                │
 │  3 numbered answers            about this topic."                       │
 │  + clickable timestamps              │                                  │
@@ -90,7 +89,7 @@ When the system cannot answer from its transcript knowledge base, an integrated 
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                    EVALUATION PIPELINE (on-demand)                       │
+│                    EVALUATION PIPELINE (on-demand)                      │
 │                                                                         │
 │  Ground Truth Generator ──► Groq qwen3-32b (independent model family)   │
 │        │                                                                │
@@ -103,9 +102,9 @@ When the system cannot answer from its transcript knowledge base, an integrated 
 │        │                                                                │
 │        ▼                                                                │
 │  Confidence Score = weighted sum (0.0 – 1.0)                            │
-│  ├── < 0.4 → retry suggestion shown                                    │
-│  ├── < 0.6 → auto-logged to rag_evaluation_log.csv                     │
-│  └── Retry triggers hybrid_retrieve_broad() with wider k               │
+│  ├── < 0.4 → retry suggestion shown                                     │
+│  ├── < 0.6 → auto-logged to rag_evaluation_log.csv                      │
+│  └── Retry triggers hybrid_retrieve_broad() with wider k                │
 └─────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -113,17 +112,17 @@ When the system cannot answer from its transcript knowledge base, an integrated 
 │                        FRONTEND (Streamlit)                             │
 │                                                                         │
 │  ├── Streamed answer display with clickable timestamps                  │
-│  ├── TTS audio playback (Piper local / gTTS cloud — auto-selected)     │
+│  ├── TTS audio playback (Piper local / gTTS cloud — auto-selected)      │
 │  ├── RAGAS evaluation panel with confidence visualization               │
 │  ├── Retry-on-low-confidence with side-by-side comparison               │
 │  ├── Evaluation history dashboard with trend charts                     │
 │  └── Dynamic video ingestion (local only — disabled on Cloud)           │
 └─────────────────────────────────────────────────────────────────────────┘
-`
+```
 
 ### Component Interaction Map
 
-`
+```
                     ┌─────────────┐
                     │   app.py    │  ◄── Streamlit entry point
                     └──────┬──────┘
@@ -146,7 +145,7 @@ When the system cannot answer from its transcript knowledge base, an integrated 
       │ chroma_db │            │ DuckDuckGo + │
       │ (ChromaDB)│            │ httpx + Groq │
       └───────────┘            └──────────────┘
-`
+```
 
 ---
 
@@ -229,45 +228,43 @@ This is **by design** — the system refuses to answer from its own parametric k
 
 ## 📁 Project Structure
 
-`
-LexiChat/
+```
+VideoRaG/
+├── config.py
+├── app.py
+├── requirements.txt
+├── .env.example
+├── .gitattributes
 │
-├── config.py                    ← Central config: paths, model names, thresholds, toggles
-├── app.py                       ← Streamlit UI — the application entry point
-├── requirements.txt             ← Python dependencies
-├── .env.example                 ← Template for required API keys
-├── .gitattributes               ← Marks chroma_db files as binary (prevents corruption)
+├── architecture/
+│   │
+│   ├── data/
+│   │   ├── videos.csv
+│   │   ├── video_with_meta_data_and_transcript.csv
+│   │   └── urls.txt
+│   │
+│   ├── ingestion/
+│   │   ├── youtube_meta_data.py
+│   │   ├── transcript_generate.py
+│   │   ├── doc_loader.py
+│   │   ├── ingestion_pipeline.py
+│   │   └── vector_store_chroma.py
+│   │
+│   ├── retrieval/
+│   │   └── retriever_pipeline.py
+│   │
+│   ├── evaluation/
+│   │   ├── evaluation_pipeline.py
+│   │   └── metrics_tracker.py
+│   │
+│   └── web_search/
+│       └── web_search.py
 │
-├── architecture/                ← All core logic, layered by concern
-│   │
-│   ├── data/                    ← Source data files
-│   │   ├── videos.csv                           ← Video metadata (title, URL, channel)
-│   │   ├── video_with_meta_data_and_transcript.csv  ← Per-chunk transcript with timestamps
-│   │   └── urls.txt                             ← Raw YouTube URLs for ingestion
-│   │
-│   ├── ingestion/               ← Data pipeline: metadata → transcript → embed
-│   │   ├── youtube_meta_data.py     ← yt-dlp: extract metadata + dump playlist URLs
-│   │   ├── transcript_generate.py   ← youtube-transcript-api (yt-dlp fallback for cloud IPs)
-│   │   ├── doc_loader.py            ← CSV → LangChain Documents + SHA-256 dedup
-│   │   ├── ingestion_pipeline.py    ← Streamlit-facing orchestrator (ingest single video)
-│   │   └── vector_store_chroma.py   ← Build / incrementally update ChromaDB collection
-│   │
-│   ├── retrieval/               ← Hybrid retrieval + query decomposition + answer generation
-│   │   └── retriever_pipeline.py    ← MMR + MultiQuery + BM25 + CrossEncoder + Groq LLM
-│   │
-│   ├── evaluation/              ← RAG quality measurement
-│   │   ├── evaluation_pipeline.py   ← RAGAS runner, confidence scoring, CSV logger
-│   │   └── metrics_tracker.py       ← Latency and error rate instrumentation
-│   │
-│   └── web_search/              ← Open-web fallback when RAG cannot answer
-│       └── web_search.py            ← DDG search + httpx page scraping + Groq synthesis
-│
-├── chroma_db/                   ← Persistent ChromaDB vector store (committed to git)
-├── logs/                        ← Runtime logs + evaluation CSV (gitignored)
-├── assets/                      ← UI screenshots
-├── .streamlit/config.toml       ← Streamlit theme (dark mode)
-└── .devcontainer/               ← GitHub Codespaces support
-`
+├── chroma_db/
+├── logs/
+├── assets/
+└── .streamlit/
+```
 
 ---
 
