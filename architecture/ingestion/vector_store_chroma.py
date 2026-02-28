@@ -1,12 +1,13 @@
 #use chromadb or any other vector store  which has the ability to persist
 #we cannot use FAISS because it does not have the ability of persistence
+import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from tqdm import tqdm  #to get the status bar while we are creating embedding
 import uuid
 from config import TRANSCRIPT_CSV, VectorStoreConfig, EmbeddingConfig
 
-from doc_loader import Csv_Loader
+from architecture.ingestion.doc_loader import Csv_Loader
 from dotenv import load_dotenv
 load_dotenv()
 

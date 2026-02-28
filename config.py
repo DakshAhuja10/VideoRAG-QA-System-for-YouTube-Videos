@@ -37,9 +37,10 @@ APP_LOG_FILE = LOGS_DIR / "app.log"
 RAG_EVALUATION_LOG_FILE = LOGS_DIR / "rag_evaluation_log.csv"
 
 # Data files
-VIDEOS_CSV = BASE_DIR / "videos.csv"
-TRANSCRIPT_CSV = BASE_DIR / "video_with_meta_data_and_transcript.csv"
-URLS_FILE = BASE_DIR / "urls.txt"
+DATA_DIR = BASE_DIR / "architecture" / "data"
+VIDEOS_CSV = DATA_DIR / "videos.csv"
+TRANSCRIPT_CSV = DATA_DIR / "video_with_meta_data_and_transcript.csv"
+URLS_FILE = DATA_DIR / "urls.txt"
 
 
 # ============================================================================
@@ -93,6 +94,14 @@ class RetrievalConfig:
     RERANK_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     # Rationale: Lightweight but effective, good balance of speed and quality
 
+    # Minimum CrossEncoder score required to proceed with answering.
+    # ms-marco-MiniLM-L-6-v2 outputs raw logits (not probabilities).
+    # In-context relevant chunks typically score > 2.0.
+    # Tangential / out-of-context chunks typically score < 0.
+    # Calibrated against corpus: lowest in-context = 1.804, highest OOC = -3.911.
+    # Threshold 0.5 gives a safety buffer of ~1.3 units below the weakest in-context score.
+    RERANK_MIN_SCORE = 0.5
+
 
 # ============================================================================
 # EMBEDDING CONFIGURATION
@@ -119,7 +128,7 @@ class LLMConfig:
     """LLM model configuration for answer generation and evaluation."""
     
     # Answer Generation LLM
-    ANSWER_MODEL = "llama-3.1-8b-instant"  # Groq model
+    ANSWER_MODEL = "llama-3.3-70b-versatile"  # Groq model
     ANSWER_TEMPERATURE = 0  # Deterministic outputs for consistency
     # Rationale: temperature=0 ensures reproducible answers for same question
     
@@ -165,8 +174,8 @@ class EvaluationConfig:
     # - Context Precision (10%): Noise is less critical if the LLM can filter it out successfully
     
     # Confidence threshold for retry suggestion
-    CONFIDENCE_THRESHOLD = 0.5
-    # Rationale: Below 0.5 indicates low-quality answer worth retrying
+    CONFIDENCE_THRESHOLD = 0.4
+    # Rationale: Below 0.4 indicates low-quality answer worth retrying
     
     # Auto-logging threshold
     AUTO_LOG_THRESHOLD = 0.6
@@ -295,6 +304,7 @@ def validate_config() -> bool:
 
 __all__ = [
     "BASE_DIR",
+    "DATA_DIR",
     "CHROMA_DB_DIR",
     "LOGS_DIR",
     "APP_LOG_FILE",

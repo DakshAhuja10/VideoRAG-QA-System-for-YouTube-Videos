@@ -14,6 +14,7 @@
 #there may be a case when llm might give a same answer twice this prevents us from that 
 #(Relevant+Diverse)
 
+import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from langchain_chroma import Chroma
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -270,43 +271,52 @@ def docs_to_prompt_context(structured_docs):
 #we strictly force the llm to answer only from the context and not from its own knowledge and not hallucinate 
 #we also tell the model to generate clickable timestamps for every answer it generates 
 rank_prompt = PromptTemplate.from_template(
-f"""You must answer ONLY using the context chunks below.
+"""CONTEXT CHUNKS:
+{context}
 
-If none of the chunks answer the question, reply EXACTLY:
-"I don't know. The transcripts do not contain the answer."
+QUESTION: {question}
 
-CRITICAL RULES (MANDATORY):
-1. Use ONLY the provided timestamps and URLs.
-2. Do NOT invent or modify timestamps.
-3. Do NOT merge multiple chunks into one answer.
-4. Select EXACTLY the TOP 3 most relevant chunks.
-5. EACH answer must contain **at least TWO complete, grammatically correct sentences**.
-6. EACH answer must be **explanatory**, not a phrase, heading, or fragment.
-7. EACH answer must be **3–4 full sentences total**.
-8. EACH answer must end with **ONE clickable timestamp**.
-9. DO NOT output sentence fragments, titles, or transcript headings.
+---
+STRICT RULES — violating any rule is not allowed under any circumstances:
 
-STRICT OUTPUT FORMAT (NO DEVIATION):
-1. <Answer written in 3–4 complete sentences.> [[MM:SS]](URL)
-2. <Answer written in 3–4 complete sentences.> [[MM:SS]](URL)
-3. <Answer written in 3–4 complete sentences.> [[MM:SS]](URL)
+RULE 1: Use ONLY information that is EXPLICITLY stated in the context chunks above. Never use your own knowledge.
 
-----------------------
-CONTEXT CHUNKS:
-{{context}}
-----------------------
+RULE 2: These words and phrases are FORBIDDEN in your response: "could be related", "might be", "possibly", "more research needed", "I cannot confirm", "without more information", "the context mentions", "the chunk mentions", "the discussion is", "the speaker mentions", "as mentioned", "discussion about", "it is mentioned that", "the transcripts mention", "suggests a connection".
 
-QUESTION:
-{{question}}
+RULE 3: Before writing any answer, ask yourself: "Is there at least one chunk that is PRIMARILY and SUBSTANTIALLY about this exact topic — not just a passing word match?" 
+         - If NO → output this single line and stop: I don't know. The transcripts do not contain information about this topic.
+         - If you find yourself writing "the context does not provide a clear explanation" or similar — that means NO. Stop and output the refusal line.
+         - A tangential or incidental mention of a word is NOT enough. The chunk must be substantially about the topic.
 
-IMPORTANT:
-If an answer is shorter than two full sentences, REWRITE it to meet the rules.
+RULE 4: If the context IS substantially about the topic, write exactly 3 numbered answers:
+         - Each answer must directly explain the actual content — facts, concepts, examples, processes, names, numbers — as if teaching the user.
+         - Each answer must be 3-4 sentences of real substance.
+         - Each answer must end with this EXACT clickable format: [[MM:SS]](URL) — copy URL and timestamp verbatim from the context.
+         - No preamble before answer 1.
+
+RULE 5: Each answer must come from a DIFFERENT chunk with distinct, non-overlapping information.
 """
 )
 
 
 # Answer-generation LLM — cached via _load_answer_llm() above
 llm = _load_answer_llm()
+
+_DONT_KNOW = "I don't know. The transcripts do not contain information about this topic."
+
+
+def _check_relevance(docs: list) -> bool:
+    """
+    Score-based relevance gate using CrossEncoder rerank scores.
+    Returns False (= refuse to answer) when the best-matching chunk scored
+    below RERANK_MIN_SCORE, indicating no chunk is truly relevant to the query.
+    """
+    if not docs:
+        return False
+    top_score = docs[0].metadata.get("rerank_score", 0.0)
+    import logging
+    logging.getLogger(__name__).info(f"Top rerank score: {top_score:.3f} (threshold: {RetrievalConfig.RERANK_MIN_SCORE})")
+    return top_score >= RetrievalConfig.RERANK_MIN_SCORE
 
 
 #this function is finally used to run the complete retrieval pipeline
@@ -325,14 +335,18 @@ def ask(question: str):
     structured_docs = format_docs_structured(docs)
     prompt_context = docs_to_prompt_context(structured_docs)
 
-    # Track LLM generation latency
-    # with track_latency("llm_generation", query_id=query_id):
-    final_prompt = rank_prompt.format(context=prompt_context, question=question)
+    if not _check_relevance(docs):
+        return {
+            "answer": _DONT_KNOW,
+            "retrieved_contexts": [d["text"] for d in structured_docs],
+            "query_id": query_id,
+        }
+
+    final_prompt = rank_prompt.format(
+        context=prompt_context,
+        question=question,
+    )
     response = llm.invoke(final_prompt).content
-        
-    # Estimate token usage (rough approximation: 1 token ≈ 4 characters)
-    estimated_tokens = (len(final_prompt) + len(response)) // 4
-    # track_api_call("groq", estimated_tokens, query_id=query_id)
 
     return {
         "answer": response,
@@ -349,21 +363,25 @@ def ask_stream(question: str):
     - {"type": "done", "retrieved_contexts": [...], "query_id": ...} when complete
     """
     query_id = str(uuid.uuid4())
-    import time
-    
+
     docs = hybrid_retrieve(question)
     structured_docs = format_docs_structured(docs)
     prompt_context = docs_to_prompt_context(structured_docs)
-    final_prompt = rank_prompt.format(context=prompt_context, question=question)
-    
-    start_time = time.time()
-    response_text = ""
-    
+
+    if not _check_relevance(docs):
+        yield {"type": "token", "content": _DONT_KNOW}
+        yield {"type": "done", "retrieved_contexts": [d["text"] for d in structured_docs], "query_id": query_id}
+        return
+
+    final_prompt = rank_prompt.format(
+        context=prompt_context,
+        question=question,
+    )
+
     for chunk in llm.stream(final_prompt):
         if chunk.content:
-            response_text += chunk.content
             yield {"type": "token", "content": chunk.content}
-    
+
     yield {
         "type": "done",
         "retrieved_contexts": [d["text"] for d in structured_docs],
@@ -380,18 +398,23 @@ def ask_stream_broad(question: str):
     Same yield contract as ask_stream.
     """
     query_id = str(uuid.uuid4())
-    import time
 
     docs = hybrid_retrieve_broad(question)
     structured_docs = format_docs_structured(docs)
     prompt_context = docs_to_prompt_context(structured_docs)
-    final_prompt = rank_prompt.format(context=prompt_context, question=question)
 
-    response_text = ""
+    if not _check_relevance(docs):
+        yield {"type": "token", "content": _DONT_KNOW}
+        yield {"type": "done", "retrieved_contexts": [d["text"] for d in structured_docs], "query_id": query_id}
+        return
+
+    final_prompt = rank_prompt.format(
+        context=prompt_context,
+        question=question,
+    )
 
     for chunk in llm.stream(final_prompt):
         if chunk.content:
-            response_text += chunk.content
             yield {"type": "token", "content": chunk.content}
 
     yield {

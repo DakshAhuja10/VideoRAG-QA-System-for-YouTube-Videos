@@ -5,6 +5,7 @@
         # 3.Faithfulness : Did the answer stick to the provided context
         # 4.Answer Relevancy : Did the model actually answer the question
 #for evaluating a rag on above parameters we need question,answer,context and ground truth
+import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import os
 import re
 import json

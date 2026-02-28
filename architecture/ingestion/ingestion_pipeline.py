@@ -1,11 +1,12 @@
+import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import os
 import re
 import tempfile
 from types import SimpleNamespace
 
 import pandas as pd
-from youtube_meta_data import get_video_info, append_data_to_csv
-from transcript_generate import ytt_api
+from architecture.ingestion.youtube_meta_data import get_video_info, append_data_to_csv
+from architecture.ingestion.transcript_generate import ytt_api
 from config import VIDEOS_CSV, TRANSCRIPT_CSV, VectorStoreConfig, EmbeddingConfig
 
 

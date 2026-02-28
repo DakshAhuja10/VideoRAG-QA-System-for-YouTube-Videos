@@ -4,23 +4,13 @@
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
 
 # ======================
 # Virtual Environments
 # ======================
 venv/
 .env
-
-
-
-
-# ======================
-# Experiments / drafts
-# ======================
-test.ipynb
-retriever_pipeline1.py
-interview_questions_and_answers.txt
-piper_voices_output/
 
 # ======================
 # OS / Editor
@@ -29,10 +19,12 @@ piper_voices_output/
 .vscode/
 
 # ======================
-# Logs / temp
+# Logs / temp files
 # ======================
 *.log
 logs/
+temp_voice.wav
+answer.mp3
 
 # ======================
 # Streamlit secrets
@@ -40,9 +32,12 @@ logs/
 .streamlit/secrets.toml
 
 # ======================
-# Dev / internal docs
+# Non-essential files
+# (experiments, drafts, internal docs)
 # ======================
-METRICS_TRACKING.md
-metrics_tracker.py
-CODE_QUALITY_IMPROVEMENTS.md
-BUGFIX_EVALUATION_HISTORY.md
+ignore/
+
+# ======================
+# ChromaDB vector store
+# ======================
+chroma_db/

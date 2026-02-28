@@ -89,8 +89,8 @@ def append_data_to_csv(video_info, file_path):
 
 if __name__ == "__main__":
     playlist_url = "https://www.youtube.com/playlist?list=PLmWa9ZZLlCjvTdH_rk9NwZtsd2h9ORZYt"
-    urls_file_path = "15.LexiChat/urls.txt"
-    csv_file_path = "15.LexiChat/videos.csv"
+    urls_file_path = "15.LexiChat/architecture/data/urls.txt"
+    csv_file_path = "15.LexiChat/architecture/data/videos.csv"
 
     # Step 1: Dump URLs from playlist to a file
     dump_urls_to_file(playlist_url, urls_file_path)

@@ -9,8 +9,8 @@ import subprocess
 from pathlib import Path
 
 
-from retriever_pipeline2 import ask, ask_stream, ask_stream_broad
-from evaluation_pipeline import evaluate_answer
+from architecture.retrieval.retriever_pipeline2 import ask, ask_stream, ask_stream_broad
+from architecture.evaluation.evaluation_pipeline import evaluate_answer
 from config import (
     PIPER_EXE,
     PIPER_VOICE,
@@ -164,8 +164,14 @@ default_state = {
     "original_confidence": None,
     "evaluation_requested": False,
     "evaluation_in_progress": False,
-    
-    
+
+    # Web search fallback state (used when RAG returns "I don't know")
+    "is_dont_know": False,
+    "web_search_done": False,
+    "web_search_answer": None,
+    "web_search_sources": [],
+    "web_search_error": None,
+
     #audio state
     "audio_file": None,
     "audio_generating": False,
@@ -320,7 +326,7 @@ if page == "💬 Ask a Question":
                 if input_url:
                     if "youtube.com" in input_url or "youtu.be" in input_url:
                         with st.status("Ingesting video content...", expanded=True) as status:
-                            from ingestion_pipeline import ingest_video
+                            from architecture.ingestion.ingestion_pipeline import ingest_video
                             progress_bar = st.progress(0)
                             
                             def update_progress(pct, msg):
@@ -395,6 +401,12 @@ if page == "💬 Ask a Question":
         st.session_state.retried_answer = None
         st.session_state.original_confidence = None
         st.session_state.evaluation_requested = False
+        # web search state
+        st.session_state.is_dont_know = False
+        st.session_state.web_search_done = False
+        st.session_state.web_search_answer = None
+        st.session_state.web_search_sources = []
+        st.session_state.web_search_error = None
         #for audio
         st.session_state.audio_file = None
         st.session_state.audio_generating = False
@@ -428,19 +440,70 @@ if page == "💬 Ask a Question":
         st.session_state.answer_placeholder_content = full_answer
         st.session_state.stream_done = True
         st.session_state.query_id = query_id  # Store for metrics tracking
+        # Detect "I don't know" — triggers web search fallback option.
+        # Matched against the EXACT phrases enforced by the LLM prompt in
+        # retriever_pipeline2.py so edge-cases like "I do not know" or a
+        # partial phrase don't accidentally suppress the Evaluate button.
+        _DONT_KNOW_PHRASES = [
+            "i don't know. the transcripts do not contain the answer",       # old prompt phrase
+            "i don't know. the transcripts do not contain information",      # new prompt phrase
+            "transcripts do not contain the answer",                         # partial fallback
+            "transcripts do not contain information",                        # partial fallback
+            "i do not know",                                                 # grammatical variant
+        ]
+        _lower = full_answer.lower()
+        st.session_state.is_dont_know = any(p in _lower for p in _DONT_KNOW_PHRASES)
 
     # Display the answer (only once)
     if st.session_state.answer_placeholder_content:
         st.subheader("🧠 Answer")
         st.markdown(st.session_state.answer_placeholder_content, unsafe_allow_html=True)
 
-    # Show evaluate button if answer is ready but evaluation not done
+    # Show evaluate button or web search fallback depending on answer type
     if st.session_state.stream_done and not st.session_state.eval_out:
         st.divider()
-        if st.button("🔍 Evaluate Answer Quality", use_container_width=True):
-            st.session_state.evaluation_requested = True
-            st.session_state.evaluation_in_progress = True
-            st.rerun()
+        if st.session_state.is_dont_know and not st.session_state.web_search_done:
+            # RAG had no answer — offer web search instead, hide evaluation
+            # (evaluation scores would be meaningless with empty retrieved context)
+            st.info(
+                "💡 The video transcripts don't contain an answer to this question. "
+                "Would you like to search the web instead?"
+            )
+            if st.button("🌐 Search the Web with DuckDuckGo", use_container_width=True):
+                with st.spinner("🌐 Searching the web..."):
+                    from architecture.web_search.web_search import web_search_answer as _web_search
+                    result = _web_search(st.session_state.question)
+                st.session_state.web_search_answer = result["answer"]
+                st.session_state.web_search_sources = result["sources"]
+                st.session_state.web_search_error = result.get("error")
+                st.session_state.web_search_done = True
+                # Point rag_answer at the web result so the audio section
+                # below reads the web answer instead of "I don't know"
+                if result["answer"]:
+                    st.session_state.rag_answer = result["answer"]
+                st.rerun()
+        elif not st.session_state.is_dont_know:
+            if st.button("🔍 Evaluate Answer Quality", use_container_width=True):
+                st.session_state.evaluation_requested = True
+                st.session_state.evaluation_in_progress = True
+                st.rerun()
+
+    # Display web search result
+    if st.session_state.web_search_done:
+        st.subheader("🌐 Web Search Answer")
+        if st.session_state.web_search_error and not st.session_state.web_search_answer:
+            st.error(f"Web search failed: {st.session_state.web_search_error}")
+        else:
+            st.markdown(st.session_state.web_search_answer, unsafe_allow_html=True)
+            if st.session_state.web_search_sources:
+                st.divider()
+                st.caption("**Sources:**")
+                # Deduplicate sources before display
+                _seen_urls: set = set()
+                for _idx, _url in enumerate(st.session_state.web_search_sources, 1):
+                    if _url not in _seen_urls:
+                        _seen_urls.add(_url)
+                        st.caption(f"{_idx}. \U0001f517 {_url}")
 
     # Run evaluation if requested
     if st.session_state.evaluation_requested and not st.session_state.eval_out and st.session_state.evaluation_in_progress:
