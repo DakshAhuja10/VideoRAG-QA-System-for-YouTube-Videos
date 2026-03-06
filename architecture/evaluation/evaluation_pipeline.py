@@ -39,11 +39,6 @@ from config import (
     get_confidence_weights,
 )
 
-# Observability
-from architecture.observability.langfuse_tracing import (
-    start_span, end_span, log_generation, score_trace, timed_span,
-)
-
 # ── Why two separate LLM instances? ──────────────────────────────────────────
 # Using the same model for both ground-truth generation and RAGAS evaluation
 # creates circular scoring: the judge trivially rewards its own phrasing.
@@ -185,20 +180,9 @@ def clean_answer_for_evaluation(answer: str) -> str:
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     return cleaned
 
-def evaluate_answer(question, rag_answer, retrieved_contexts, trace=None):
-    eval_span = start_span(trace, name="evaluation", input={"question": question})
-
+def evaluate_answer(question, rag_answer, retrieved_contexts):
     formatted_context = "\n".join(retrieved_contexts)
-
-    with timed_span(eval_span, name="generate_reference") as (ref_span, _):
-        reference = generate_reference_answer(question, formatted_context)
-        end_span(ref_span, output={"reference": reference[:300]})
-
-    log_generation(
-        eval_span, name="ground_truth_llm", model=LLMConfig.GROUND_TRUTH_MODEL,
-        input=question, output=reference,
-        metadata={"purpose": "reference_answer_generation"},
-    )
+    reference = generate_reference_answer(question,formatted_context)
     
     # Clean the answer so RAGAS doesn't penalize UI formatting
     cleaned_rag_answer = clean_answer_for_evaluation(rag_answer)
@@ -210,19 +194,19 @@ def evaluate_answer(question, rag_answer, retrieved_contexts, trace=None):
         "reference": reference,
     }]))
 
-    with timed_span(eval_span, name="ragas_evaluate") as (ragas_span, _):
-        results = evaluate(
-            dataset,
-            metrics=[
-                context_precision,
-                context_recall,
-                answer_relevancy,
-                faithfulness,
-            ],
-            llm=llm,
-            embeddings=embedding_model,
-        )
-        end_span(ragas_span)
+    
+    # ragas framwork to calculate the values of all ragas parameters
+    results = evaluate(
+        dataset,
+        metrics=[
+            context_precision,
+            context_recall,
+            answer_relevancy,
+            faithfulness,
+        ],
+        llm=llm,
+        embeddings=embedding_model,
+    )
 
     scores_df = results.to_pandas()
     numeric_scores = scores_df.loc[0, [
@@ -237,22 +221,8 @@ def evaluate_answer(question, rag_answer, retrieved_contexts, trace=None):
 
     confidence = compute_confidence(numeric_scores)
 
-    # Push RAGAS scores + confidence to Langfuse
-    if trace:
-        for metric_name in ["context_precision", "context_recall", "answer_relevancy", "faithfulness"]:
-            score_trace(trace, name=metric_name, value=float(numeric_scores[metric_name]))
-        score_trace(trace, name="confidence", value=float(confidence))
-        score_trace(trace, name="ragas_mean", value=float(final_score_mean))
-
-    end_span(eval_span, output={
-        "confidence": round(float(confidence), 4),
-        "context_precision": round(float(numeric_scores["context_precision"]), 4),
-        "context_recall": round(float(numeric_scores["context_recall"]), 4),
-        "answer_relevancy": round(float(numeric_scores["answer_relevancy"]), 4),
-        "faithfulness": round(float(numeric_scores["faithfulness"]), 4),
-    })
-
     # Always log all evaluations to build a complete history
+    # This allows tracking performance trends over time
     log_evaluation(
         question,
         rag_answer,

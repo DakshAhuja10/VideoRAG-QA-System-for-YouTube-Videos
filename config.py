@@ -329,7 +329,6 @@ def validate_config() -> bool:
 
 __all__ = [
     "BASE_DIR",
-    "IS_STREAMLIT_CLOUD",
     "DATA_DIR",
     "CHROMA_DB_DIR",
     "LOGS_DIR",

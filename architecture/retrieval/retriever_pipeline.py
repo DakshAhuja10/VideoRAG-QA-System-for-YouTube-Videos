@@ -40,11 +40,8 @@ from config import (
     PromptConfig,
 )
 
-# Observability
-from architecture.observability.langfuse_tracing import (
-    create_trace, start_span, end_span, log_generation,
-    score_trace, timed_span, flush as langfuse_flush, estimate_cost,
-)
+# Import metrics tracking
+# from metrics_tracker import track_latency, track_api_call
 
 load_dotenv()
 
@@ -147,108 +144,86 @@ def combine_results(*retrieved_lists):
     return unique_docs
 
 
-def hybrid_retrieve(query, trace=None):
+def hybrid_retrieve(query):
     """Standard retrieval used for first-pass answers."""
-    retrieval_span = start_span(trace, name="retrieval", input={"query": query, "mode": "standard"})
-
     # Phase 1: Broad Retrieval (Greater k to allow re-ranker to find the best)
-    with timed_span(retrieval_span, name="mmr_retrieve", input={"k": RetrievalConfig.MMR_K, "fetch_k": RetrievalConfig.MMR_FETCH_K}) as (s1, t1):
-        r1 = mmr_retriever.invoke(query)
-        end_span(s1, output={"doc_count": len(r1)})
-
-    with timed_span(retrieval_span, name="multiquery_retrieve", input={"k": RetrievalConfig.MULTIQUERY_K}) as (s2, t2):
-        r2 = multi_retriever.invoke(query)
-        end_span(s2, output={"doc_count": len(r2)})
+    r1 = mmr_retriever.invoke(query)  # Fetches based on relevance + diversity
+    r2 = multi_retriever.invoke(query) # Fetches based on LLM query expansions
 
     results = [r1, r2]
 
     if bm25:
-        with timed_span(retrieval_span, name="bm25_retrieve", input={"k": RetrievalConfig.BM25_K}) as (s3, t3):
-            r3 = bm25.invoke(query)
-            end_span(s3, output={"doc_count": len(r3)})
+        r3 = bm25.invoke(query) # Keyword matching
         results.append(r3)
 
-    with timed_span(retrieval_span, name="combine_dedup") as (s4, t4):
-        combined = combine_results(*results)
-        end_span(s4, output={"before_dedup": sum(len(r) for r in results), "after_dedup": len(combined)})
+    combined = combine_results(*results)
 
     # Phase 2: Re-ranking (Cross-Encoder)
     if combined:
-        with timed_span(retrieval_span, name="cross_encoder_rerank", input={"num_docs": len(combined), "model": RetrievalConfig.RERANK_MODEL}) as (s5, t5):
-            pairs = [[query, doc.page_content] for doc in combined]
-            scores = rerank_model.predict(pairs)
+        # Prepare pairs: [[query, doc1], [query, doc2], ...]
+        pairs = [[query, doc.page_content] for doc in combined]
+        scores = rerank_model.predict(pairs)
 
-            for i, doc in enumerate(combined):
-                doc.metadata["rerank_score"] = float(scores[i])
+        # Attach scores and sort
+        for i, doc in enumerate(combined):
+            doc.metadata["rerank_score"] = float(scores[i])
 
-            combined.sort(key=lambda x: x.metadata["rerank_score"], reverse=True)
+        combined.sort(key=lambda x: x.metadata["rerank_score"], reverse=True)
 
-            rerank_output = [
-                {"rank": i+1, "score": round(float(scores[idx]), 4), "preview": combined[i].page_content[:120]}
-                for i, idx in enumerate(range(min(RetrievalConfig.RERANK_TOP_N, len(combined))))
-            ]
-            end_span(s5, output={"top_n": RetrievalConfig.RERANK_TOP_N, "top_score": round(float(combined[0].metadata["rerank_score"]), 4), "ranking": rerank_output})
-
-    end_span(retrieval_span, output={"final_doc_count": min(RetrievalConfig.RERANK_TOP_N, len(combined))})
+    # Return top N most relevant after re-ranking (from config)
     return combined[:RetrievalConfig.RERANK_TOP_N]
 
 
-def hybrid_retrieve_broad(query, trace=None):
+def hybrid_retrieve_broad(query):
     """
     Wider retrieval used on retry when the first-pass confidence is low.
 
     Differences vs hybrid_retrieve:
     - MMR: fetches 40 candidates (vs 20) and returns top 12 (vs 6).
+      A larger candidate pool forces MMR to explore more of the vector space,
+      surfacing chunks that a shallow search misses.
+    - MultiQuery: reuses the same retriever; because the underlying LLM is
+      non-deterministic it will generate different query expansions, hitting
+      different parts of the index.
     - BM25: returns 12 docs (vs 6), broadening keyword coverage.
-    - Reranker: keeps top 15 after scoring (vs 10).
+    - Reranker: keeps top 15 after scoring (vs 10), giving the LLM a richer
+      context window to find an explicit answer in.
     """
-    retrieval_span = start_span(trace, name="retrieval_broad", input={"query": query, "mode": "broad_retry"})
+    # Create a wider MMR retriever on-the-fly using the cached vector_store.
+    # This is cheap — it's just a config wrapper over the already-loaded Chroma
+    # connection; no model weights are reloaded.
+    mmr_broad = vector_store.as_retriever(
+        search_type="mmr",
+        search_kwargs={"k": 12, "fetch_k": 40},
+    )
+    r1 = mmr_broad.invoke(query)
 
-    with timed_span(retrieval_span, name="mmr_retrieve_broad", input={"k": 12, "fetch_k": 40}) as (s1, _):
-        mmr_broad = vector_store.as_retriever(
-            search_type="mmr",
-            search_kwargs={"k": 12, "fetch_k": 40},
-        )
-        r1 = mmr_broad.invoke(query)
-        end_span(s1, output={"doc_count": len(r1)})
-
-    with timed_span(retrieval_span, name="multiquery_retrieve_broad", input={"k": 10}) as (s2, _):
-        mq_broad = vector_store.as_retriever(search_kwargs={"k": 10})
-        mq_llm = ChatGoogleGenerativeAI(model=LLMConfig.MULTIQUERY_MODEL)
-        multi_broad = MultiQueryRetriever.from_llm(retriever=mq_broad, llm=mq_llm)
-        r2 = multi_broad.invoke(query)
-        end_span(s2, output={"doc_count": len(r2)})
+    # MultiQuery with a wider per-sub-query k
+    mq_broad = vector_store.as_retriever(search_kwargs={"k": 10})
+    mq_llm = ChatGoogleGenerativeAI(model=LLMConfig.MULTIQUERY_MODEL)
+    multi_broad = MultiQueryRetriever.from_llm(retriever=mq_broad, llm=mq_llm)
+    r2 = multi_broad.invoke(query)
 
     results = [r1, r2]
 
     if bm25:
-        with timed_span(retrieval_span, name="bm25_retrieve_broad", input={"k": 12}) as (s3, _):
-            original_k = bm25.k
-            bm25.k = 12
-            r3 = bm25.invoke(query)
-            bm25.k = original_k
-            end_span(s3, output={"doc_count": len(r3)})
+        original_k = bm25.k
+        bm25.k = 12          # temporarily widen BM25
+        r3 = bm25.invoke(query)
+        bm25.k = original_k  # restore so normal retrieval is unaffected
         results.append(r3)
 
-    with timed_span(retrieval_span, name="combine_dedup") as (s4, _):
-        combined = combine_results(*results)
-        end_span(s4, output={"before_dedup": sum(len(r) for r in results), "after_dedup": len(combined)})
+    combined = combine_results(*results)
 
+    # Re-rank and keep a larger top-N
     if combined:
-        with timed_span(retrieval_span, name="cross_encoder_rerank", input={"num_docs": len(combined)}) as (s5, _):
-            pairs = [[query, doc.page_content] for doc in combined]
-            scores = rerank_model.predict(pairs)
-            for i, doc in enumerate(combined):
-                doc.metadata["rerank_score"] = float(scores[i])
-            combined.sort(key=lambda x: x.metadata["rerank_score"], reverse=True)
+        pairs = [[query, doc.page_content] for doc in combined]
+        scores = rerank_model.predict(pairs)
+        for i, doc in enumerate(combined):
+            doc.metadata["rerank_score"] = float(scores[i])
+        combined.sort(key=lambda x: x.metadata["rerank_score"], reverse=True)
 
-            rerank_output = [
-                {"rank": i+1, "score": round(float(combined[i].metadata["rerank_score"]), 4), "preview": combined[i].page_content[:120]}
-                for i in range(min(15, len(combined)))
-            ]
-            end_span(s5, output={"top_n": 15, "top_score": round(float(combined[0].metadata["rerank_score"]), 4), "ranking": rerank_output})
-
-    end_span(retrieval_span, output={"final_doc_count": min(15, len(combined))})
+    # Keep top 15 (vs default 10) to give the LLM more grounding material
     return combined[:15]
 
 
@@ -353,47 +328,30 @@ def ask(question: str):
     Non-streaming version - returns complete answer with metrics tracking
     """
     query_id = str(uuid.uuid4())
-    trace = create_trace(name="rag_ask", metadata={"query_id": query_id, "question": question, "mode": "non_streaming"})
-
-    docs = hybrid_retrieve(question, trace=trace)
+    
+    # Track retrieval latency
+    # with track_latency("retrieval", query_id=query_id):
+    docs = hybrid_retrieve(question)
     structured_docs = format_docs_structured(docs)
     prompt_context = docs_to_prompt_context(structured_docs)
 
     if not _check_relevance(docs):
-        if trace:
-            score_trace(trace, name="relevance_gate", value=0.0, comment="Rejected: top rerank score below threshold")
-            langfuse_flush()
         return {
             "answer": _DONT_KNOW,
             "retrieved_contexts": [d["text"] for d in structured_docs],
             "query_id": query_id,
-            "trace": trace,
         }
 
     final_prompt = rank_prompt.format(
         context=prompt_context,
         question=question,
     )
-    response = llm.invoke(final_prompt)
-    answer_text = response.content
+    response = llm.invoke(final_prompt).content
 
-    # Log the LLM generation
-    usage_meta = response.response_metadata.get("usage", {}) if hasattr(response, "response_metadata") else {}
-    input_tokens = usage_meta.get("prompt_tokens", 0)
-    output_tokens = usage_meta.get("completion_tokens", 0)
-    log_generation(
-        trace, name="answer_llm", model=LLMConfig.ANSWER_MODEL,
-        input=final_prompt, output=answer_text,
-        usage={"input": input_tokens, "output": output_tokens, "total": input_tokens + output_tokens},
-        metadata={"cost_usd": estimate_cost(LLMConfig.ANSWER_MODEL, input_tokens, output_tokens)},
-    )
-
-    langfuse_flush()
     return {
-        "answer": answer_text,
+        "answer": response,
         "retrieved_contexts": [d["text"] for d in structured_docs],
         "query_id": query_id,
-        "trace": trace,
     }
 
 
@@ -402,21 +360,17 @@ def ask_stream(question: str):
     Streaming version — standard first-pass retrieval.
     Yields:
     - {"type": "token", "content": <token>} for each token
-    - {"type": "done", "retrieved_contexts": [...], "query_id": ..., "trace": ...} when complete
+    - {"type": "done", "retrieved_contexts": [...], "query_id": ...} when complete
     """
-    import time as _time
     query_id = str(uuid.uuid4())
-    trace = create_trace(name="rag_ask_stream", metadata={"query_id": query_id, "question": question, "mode": "streaming"})
 
-    docs = hybrid_retrieve(question, trace=trace)
+    docs = hybrid_retrieve(question)
     structured_docs = format_docs_structured(docs)
     prompt_context = docs_to_prompt_context(structured_docs)
 
     if not _check_relevance(docs):
-        score_trace(trace, name="relevance_gate", value=0.0, comment="Rejected: top rerank score below threshold")
-        langfuse_flush()
         yield {"type": "token", "content": _DONT_KNOW}
-        yield {"type": "done", "retrieved_contexts": [d["text"] for d in structured_docs], "query_id": query_id, "trace": trace}
+        yield {"type": "done", "retrieved_contexts": [d["text"] for d in structured_docs], "query_id": query_id}
         return
 
     final_prompt = rank_prompt.format(
@@ -424,57 +378,34 @@ def ask_stream(question: str):
         question=question,
     )
 
-    full_response = ""
-    t0 = _time.perf_counter()
-    last_chunk_meta = {}
     for chunk in llm.stream(final_prompt):
         if chunk.content:
-            full_response += chunk.content
             yield {"type": "token", "content": chunk.content}
-        if hasattr(chunk, "response_metadata") and chunk.response_metadata:
-            last_chunk_meta = chunk.response_metadata
 
-    gen_ms = (_time.perf_counter() - t0) * 1000
-    usage_meta = last_chunk_meta.get("usage", {}) or {}
-    input_tokens = usage_meta.get("prompt_tokens", 0)
-    output_tokens = usage_meta.get("completion_tokens", 0)
-
-    log_generation(
-        trace, name="answer_llm", model=LLMConfig.ANSWER_MODEL,
-        input=final_prompt, output=full_response,
-        usage={"input": input_tokens, "output": output_tokens, "total": input_tokens + output_tokens},
-        metadata={"duration_ms": round(gen_ms, 1), "cost_usd": estimate_cost(LLMConfig.ANSWER_MODEL, input_tokens, output_tokens)},
-    )
-
-    langfuse_flush()
     yield {
         "type": "done",
         "retrieved_contexts": [d["text"] for d in structured_docs],
         "query_id": query_id,
-        "trace": trace,
     }
 
 
-def ask_stream_broad(question: str, trace=None):
+def ask_stream_broad(question: str):
     """
     Streaming version using hybrid_retrieve_broad — used on retry.
+    Fetches from a larger candidate pool (MMR k=12/fetch_k=40, BM25 k=12,
+    MultiQuery k=10 per sub-query, reranker top-15) so the LLM receives
+    genuinely different and more extensive context than the first pass.
     Same yield contract as ask_stream.
     """
-    import time as _time
     query_id = str(uuid.uuid4())
-    # Reuse the trace from the initial ask_stream if provided (retry scenario)
-    if trace is None:
-        trace = create_trace(name="rag_ask_stream_broad", metadata={"query_id": query_id, "question": question, "mode": "streaming_broad_retry"})
 
-    docs = hybrid_retrieve_broad(question, trace=trace)
+    docs = hybrid_retrieve_broad(question)
     structured_docs = format_docs_structured(docs)
     prompt_context = docs_to_prompt_context(structured_docs)
 
     if not _check_relevance(docs):
-        score_trace(trace, name="relevance_gate", value=0.0, comment="Rejected on broad retry")
-        langfuse_flush()
         yield {"type": "token", "content": _DONT_KNOW}
-        yield {"type": "done", "retrieved_contexts": [d["text"] for d in structured_docs], "query_id": query_id, "trace": trace}
+        yield {"type": "done", "retrieved_contexts": [d["text"] for d in structured_docs], "query_id": query_id}
         return
 
     final_prompt = rank_prompt.format(
@@ -482,32 +413,12 @@ def ask_stream_broad(question: str, trace=None):
         question=question,
     )
 
-    full_response = ""
-    t0 = _time.perf_counter()
-    last_chunk_meta = {}
     for chunk in llm.stream(final_prompt):
         if chunk.content:
-            full_response += chunk.content
             yield {"type": "token", "content": chunk.content}
-        if hasattr(chunk, "response_metadata") and chunk.response_metadata:
-            last_chunk_meta = chunk.response_metadata
 
-    gen_ms = (_time.perf_counter() - t0) * 1000
-    usage_meta = last_chunk_meta.get("usage", {}) or {}
-    input_tokens = usage_meta.get("prompt_tokens", 0)
-    output_tokens = usage_meta.get("completion_tokens", 0)
-
-    log_generation(
-        trace, name="answer_llm_retry", model=LLMConfig.ANSWER_MODEL,
-        input=final_prompt, output=full_response,
-        usage={"input": input_tokens, "output": output_tokens, "total": input_tokens + output_tokens},
-        metadata={"duration_ms": round(gen_ms, 1), "cost_usd": estimate_cost(LLMConfig.ANSWER_MODEL, input_tokens, output_tokens)},
-    )
-
-    langfuse_flush()
     yield {
         "type": "done",
         "retrieved_contexts": [d["text"] for d in structured_docs],
         "query_id": query_id,
-        "trace": trace,
     }
