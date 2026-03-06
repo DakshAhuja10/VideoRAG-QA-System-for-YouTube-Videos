@@ -48,7 +48,7 @@ except Exception as _e:
     _diag.error(f"Startup diagnostic failed: {_e}")
 # ────────────────────────────────────────────────────────────────────────────
 
-from architecture.retrieval.retriever_pipeline import ask, ask_stream, ask_stream_broad
+from architecture.retrieval.retriever_pipeline import ask, ask_stream, ask_stream_broad, vector_store as _cached_vector_store, refresh_bm25
 from architecture.evaluation.evaluation_pipeline import evaluate_answer
 from config import (
     PIPER_EXE,
@@ -214,6 +214,11 @@ default_state = {
     #audio state
     "audio_file": None,
     "audio_generating": False,
+
+    # Active video state (set after successful ingestion)
+    "active_video_id": None,
+    "active_video_title": None,
+    "search_this_video_only": True,
 }
 
 for k, v in default_state.items():
@@ -370,19 +375,27 @@ if page == "💬 Ask a Question":
                             
                             def update_progress(pct, msg):
                                 progress_bar.progress(pct/100)
-                                # Only write major steps to avoid cluttering the UI
                                 if not msg.startswith("Generating embeddings... ("):
                                     st.write(f"**{pct}%**: {msg}")
                             
-                            success, message = ingest_video(input_url, progress_callback=update_progress)
+                            success, message, vid, vtitle = ingest_video(
+                                input_url,
+                                progress_callback=update_progress,
+                                vector_store=_cached_vector_store,
+                            )
                             if success:
+                                # Refresh BM25 index so new docs are searchable immediately
+                                refresh_bm25()
+                                # Track the active video so Q&A can scope to it
+                                st.session_state.active_video_id = vid
+                                st.session_state.active_video_title = vtitle
                                 if "already processed" in message:
                                     status.update(label="✅ Video Already Exists!", state="complete", expanded=False)
                                     st.info(message)
                                 else:
                                     status.update(label="✅ Ingestion Complete!", state="complete", expanded=False)
                                     st.success(message)
-                                    st.info("You can now ask questions about this video.")
+                                st.toast(f"Ready to answer questions about **{vtitle}**", icon="✅")
                             else:
                                 status.update(label="❌ Ingestion Failed", state="error", expanded=True)
                                 st.error(message)
@@ -422,6 +435,9 @@ if page == "💬 Ask a Question":
         # so it renders fresh on rerun, instead of incrementing a counter key.
         st.session_state.pop("input_url", None)
 
+        # Keep active video when clearing the question/answer only
+        # (user can explicitly clear via the ✕ button on the badge)
+
         if os.path.exists("answer.mp3"):
             os.remove("answer.mp3")
         st.rerun()
@@ -457,9 +473,14 @@ if page == "💬 Ask a Question":
         full_answer = ""
         retrieved_contexts = []
         query_id = None
+
+        # Determine if we should scope to a specific video
+        active_vid = None
+        if st.session_state.active_video_id and st.session_state.search_this_video_only:
+            active_vid = st.session_state.active_video_id
         
         with st.spinner("Retrieving relevant context..."):
-            for chunk in ask_stream(st.session_state.question):
+            for chunk in ask_stream(st.session_state.question, video_id=active_vid):
                 if chunk["type"] == "token":
                     # Append token and update display in real-time (without header)
                     full_answer += chunk["content"]
@@ -623,9 +644,14 @@ if page == "💬 Ask a Question":
                 # Stream the retry answer in real-time
                 full_answer = ""
                 retrieved_contexts = []
+
+                # Determine if we should scope to a specific video
+                active_vid = None
+                if st.session_state.active_video_id and st.session_state.search_this_video_only:
+                    active_vid = st.session_state.active_video_id
                 
                 with st.spinner("Retrying with broader retrieval (MMR ×2 candidates, BM25 ×2 docs, reranker top-15)..."):
-                    for chunk in ask_stream_broad(st.session_state.question):
+                    for chunk in ask_stream_broad(st.session_state.question, video_id=active_vid):
                         if chunk["type"] == "token":
                             full_answer += chunk["content"]
                             answer_placeholder.markdown(f"{full_answer}▌", unsafe_allow_html=True)

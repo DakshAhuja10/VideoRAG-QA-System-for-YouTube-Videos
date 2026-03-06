@@ -29,6 +29,8 @@ class Csv_Loader:
         
         for _,row in df.iterrows():
             text = row["text"]
+            if not isinstance(text, str) or not text.strip():
+                continue
             text_hash=self._compute_text_hash(text)
             
             # Metadata for citations & RAG

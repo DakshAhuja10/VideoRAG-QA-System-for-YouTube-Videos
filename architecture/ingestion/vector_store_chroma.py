@@ -32,6 +32,30 @@ def build_vector_store(progress_callback=None):
         collection_name=VectorStoreConfig.COLLECTION_NAME
     )
 
+    _add_docs_to_vector_store(docs, vector_store, progress_callback)
+
+
+def add_new_docs(docs, existing_vector_store=None, progress_callback=None):
+    """Add a list of LangChain Document objects to the vector store.
+
+    When called from the Streamlit app, *existing_vector_store* should be the
+    cached Chroma instance so we avoid opening a second connection to the same
+    SQLite file (which causes 'Error finding id').
+    """
+    if existing_vector_store is not None:
+        vs = existing_vector_store
+    else:
+        embedder = HuggingFaceEmbeddings(model_name=EmbeddingConfig.MODEL_NAME)
+        vs = Chroma(
+            embedding_function=embedder,
+            persist_directory=PERSIST_PATH,
+            collection_name=VectorStoreConfig.COLLECTION_NAME,
+        )
+    _add_docs_to_vector_store(docs, vs, progress_callback)
+
+
+def _add_docs_to_vector_store(docs, vector_store, progress_callback=None):
+    """Shared logic for adding docs (with dedup) to a Chroma vector store."""
     collection = vector_store._collection
 
     #a function to get the details if a hash is already present in the collection

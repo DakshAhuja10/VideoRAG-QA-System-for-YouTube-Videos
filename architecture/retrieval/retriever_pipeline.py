@@ -124,7 +124,11 @@ mmr_retriever, multi_retriever = _load_retrievers()
 bm25            = _load_bm25()
 
 
-# BM25 is initialised via _load_bm25() above and assigned to `bm25` at module level.
+def refresh_bm25():
+    """Clear BM25 cache and rebuild. Call after ingesting new documents."""
+    global bm25
+    _load_bm25.clear()
+    bm25 = _load_bm25()
 
 
 
@@ -144,8 +148,16 @@ def combine_results(*retrieved_lists):
     return unique_docs
 
 
-def hybrid_retrieve(query):
-    """Standard retrieval used for first-pass answers."""
+def _filter_by_video(docs, video_id):
+    """Keep only documents that belong to the given video_id."""
+    if not video_id:
+        return docs
+    return [d for d in docs if d.metadata.get("video_id") == video_id]
+
+
+def hybrid_retrieve(query, video_id=None):
+    """Standard retrieval used for first-pass answers.
+    If video_id is provided, results are filtered to that video only."""
     # Phase 1: Broad Retrieval (Greater k to allow re-ranker to find the best)
     r1 = mmr_retriever.invoke(query)  # Fetches based on relevance + diversity
     r2 = multi_retriever.invoke(query) # Fetches based on LLM query expansions
@@ -157,6 +169,10 @@ def hybrid_retrieve(query):
         results.append(r3)
 
     combined = combine_results(*results)
+
+    # Optional: filter to a specific video
+    if video_id:
+        combined = _filter_by_video(combined, video_id)
 
     # Phase 2: Re-ranking (Cross-Encoder)
     if combined:
@@ -174,24 +190,12 @@ def hybrid_retrieve(query):
     return combined[:RetrievalConfig.RERANK_TOP_N]
 
 
-def hybrid_retrieve_broad(query):
+def hybrid_retrieve_broad(query, video_id=None):
     """
     Wider retrieval used on retry when the first-pass confidence is low.
-
-    Differences vs hybrid_retrieve:
-    - MMR: fetches 40 candidates (vs 20) and returns top 12 (vs 6).
-      A larger candidate pool forces MMR to explore more of the vector space,
-      surfacing chunks that a shallow search misses.
-    - MultiQuery: reuses the same retriever; because the underlying LLM is
-      non-deterministic it will generate different query expansions, hitting
-      different parts of the index.
-    - BM25: returns 12 docs (vs 6), broadening keyword coverage.
-    - Reranker: keeps top 15 after scoring (vs 10), giving the LLM a richer
-      context window to find an explicit answer in.
+    If video_id is provided, results are filtered to that video only.
     """
     # Create a wider MMR retriever on-the-fly using the cached vector_store.
-    # This is cheap — it's just a config wrapper over the already-loaded Chroma
-    # connection; no model weights are reloaded.
     mmr_broad = vector_store.as_retriever(
         search_type="mmr",
         search_kwargs={"k": 12, "fetch_k": 40},
@@ -214,6 +218,10 @@ def hybrid_retrieve_broad(query):
         results.append(r3)
 
     combined = combine_results(*results)
+
+    # Optional: filter to a specific video
+    if video_id:
+        combined = _filter_by_video(combined, video_id)
 
     # Re-rank and keep a larger top-N
     if combined:
@@ -355,16 +363,17 @@ def ask(question: str):
     }
 
 
-def ask_stream(question: str):
+def ask_stream(question: str, video_id: str = None):
     """
     Streaming version — standard first-pass retrieval.
+    If video_id is provided, retrieval is scoped to that video only.
     Yields:
     - {"type": "token", "content": <token>} for each token
     - {"type": "done", "retrieved_contexts": [...], "query_id": ...} when complete
     """
     query_id = str(uuid.uuid4())
 
-    docs = hybrid_retrieve(question)
+    docs = hybrid_retrieve(question, video_id=video_id)
     structured_docs = format_docs_structured(docs)
     prompt_context = docs_to_prompt_context(structured_docs)
 
@@ -389,17 +398,15 @@ def ask_stream(question: str):
     }
 
 
-def ask_stream_broad(question: str):
+def ask_stream_broad(question: str, video_id: str = None):
     """
     Streaming version using hybrid_retrieve_broad — used on retry.
-    Fetches from a larger candidate pool (MMR k=12/fetch_k=40, BM25 k=12,
-    MultiQuery k=10 per sub-query, reranker top-15) so the LLM receives
-    genuinely different and more extensive context than the first pass.
+    If video_id is provided, retrieval is scoped to that video only.
     Same yield contract as ask_stream.
     """
     query_id = str(uuid.uuid4())
 
-    docs = hybrid_retrieve_broad(question)
+    docs = hybrid_retrieve_broad(question, video_id=video_id)
     structured_docs = format_docs_structured(docs)
     prompt_context = docs_to_prompt_context(structured_docs)
 
