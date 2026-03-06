@@ -50,6 +50,7 @@ except Exception as _e:
 
 from architecture.retrieval.retriever_pipeline import ask, ask_stream, ask_stream_broad
 from architecture.evaluation.evaluation_pipeline import evaluate_answer
+from architecture.observability.langfuse_tracing import flush as langfuse_flush, score_trace
 from config import (
     PIPER_EXE,
     PIPER_VOICE,
@@ -62,36 +63,9 @@ from config import (
     TTS_OUTPUT_FILE,
     validate_config,
 )
-# from metrics_tracker import (
-#     track_latency,
-#     track_query,
-#     track_error,
-#     get_session_summary,
-#     save_metrics_summary,
-#     get_metrics_tracker,
-# )
-
-# Dummy functions to reduce load time/disable latency tracking
-def track_latency(*args, **kwargs):
-    class DummyContext:
-        def __enter__(self): pass
-        def __exit__(self, *args): pass
-    return DummyContext()
-
-def track_query(*args, **kwargs): pass
+# Metrics tracking is now handled by Langfuse observability.
+# Legacy dummy stubs kept for any remaining references in audio section.
 def track_error(*args, **kwargs): pass
-def save_metrics_summary(*args, **kwargs): pass
-def get_session_summary(): 
-    return {"total_queries":0, "total_errors":0,"error_rate":0,"retry_rate":0,"latency_stats":{},"api_usage":{"calls":{}, "tokens":{}}}
-
-class DummyTracker:
-    def track_audio_generation(self, *args, **kwargs): pass
-    @property
-    def metrics_file(self):
-        from pathlib import Path
-        return Path("dummy.csv")
-
-def get_metrics_tracker(): return DummyTracker()
 
 
 LOG_FILE = str(RAG_EVALUATION_LOG_FILE)
@@ -203,6 +177,7 @@ default_state = {
     "original_confidence": None,
     "evaluation_requested": False,
     "evaluation_in_progress": False,
+    "langfuse_trace": None,  # Langfuse trace object for current question
 
     # Web search fallback state (used when RAG returns "I don't know")
     "is_dont_know": False,
@@ -220,12 +195,13 @@ for k, v in default_state.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
-def run_evaluation_async(result_container, question, rag_answer, contexts):
+def run_evaluation_async(result_container, question, rag_answer, contexts, trace=None):
     try:
         result_container["output"] = evaluate_answer(
             question=question,
             rag_answer=rag_answer,
-            retrieved_contexts=contexts
+            retrieved_contexts=contexts,
+            trace=trace,
         )
     except Exception as e:
         result_container["error"] = str(e)
@@ -289,7 +265,7 @@ def run_audio_async(result_container, text, out_path):
 
 #Sidebar
 st.sidebar.markdown("<div style='font-size: 0.75rem; font-weight: 600; color: #6b7280; margin-bottom: 10px; letter-spacing: 0.05em;'>NAVIGATION</div>", unsafe_allow_html=True)
-page = st.sidebar.radio("Navigation", ["💬 Ask a Question", "🕒 Evaluation History"], label_visibility="collapsed")
+page = st.sidebar.radio("Navigation", ["💬 Ask a Question", "🕒 Evaluation History", "📊 Observability"], label_visibility="collapsed")
 
 # Show session metrics in sidebar
 # st.sidebar.markdown("---")
@@ -457,6 +433,7 @@ if page == "💬 Ask a Question":
         full_answer = ""
         retrieved_contexts = []
         query_id = None
+        langfuse_trace = None
         
         with st.spinner("Retrieving relevant context..."):
             for chunk in ask_stream(st.session_state.question):
@@ -468,6 +445,7 @@ if page == "💬 Ask a Question":
                     # Streaming complete, get contexts and query_id
                     retrieved_contexts = chunk["retrieved_contexts"]
                     query_id = chunk.get("query_id")
+                    langfuse_trace = chunk.get("trace")
         
         # Clear the placeholder - the answer will be shown in the static section below
         answer_placeholder.empty()
@@ -478,7 +456,8 @@ if page == "💬 Ask a Question":
         st.session_state.original_answer = full_answer
         st.session_state.answer_placeholder_content = full_answer
         st.session_state.stream_done = True
-        st.session_state.query_id = query_id  # Store for metrics tracking
+        st.session_state.query_id = query_id
+        st.session_state.langfuse_trace = langfuse_trace
         # Detect "I don't know" — triggers web search fallback option.
         # Matched against the EXACT phrases enforced by the LLM prompt in
         # retriever_pipeline.py so edge-cases like "I do not know" or a
@@ -511,7 +490,7 @@ if page == "💬 Ask a Question":
             if st.button("🌐 Search the Web with DuckDuckGo", use_container_width=True):
                 with st.spinner("🌐 Searching the web..."):
                     from architecture.web_search.web_search import web_search_answer as _web_search
-                    result = _web_search(st.session_state.question)
+                    result = _web_search(st.session_state.question, trace=st.session_state.langfuse_trace)
                 st.session_state.web_search_answer = result["answer"]
                 st.session_state.web_search_sources = result["sources"]
                 st.session_state.web_search_error = result.get("error")
@@ -557,7 +536,7 @@ if page == "💬 Ask a Question":
         
         eval_thread = threading.Thread(
             target=run_evaluation_async,
-            args=(result_container,question,rag_answer,contexts)
+            args=(result_container,question,rag_answer,contexts,st.session_state.langfuse_trace)
         )
         
         eval_thread.start()
@@ -580,14 +559,8 @@ if page == "💬 Ask a Question":
         st.session_state.original_confidence = st.session_state.eval_out["confidence"]
         st.session_state.evaluation_requested = False
         st.session_state.evaluation_in_progress = False
-        
-        # Track query completion with confidence score
-        if hasattr(st.session_state, 'query_id') and st.session_state.query_id:
-            track_query(
-                st.session_state.query_id,
-                st.session_state.eval_out["confidence"],
-                was_retry=False
-            )
+
+        langfuse_flush()
         
         
         time.sleep(0.5)
@@ -625,7 +598,7 @@ if page == "💬 Ask a Question":
                 retrieved_contexts = []
                 
                 with st.spinner("Retrying with broader retrieval (MMR ×2 candidates, BM25 ×2 docs, reranker top-15)..."):
-                    for chunk in ask_stream_broad(st.session_state.question):
+                    for chunk in ask_stream_broad(st.session_state.question, trace=st.session_state.langfuse_trace):
                         if chunk["type"] == "token":
                             full_answer += chunk["content"]
                             answer_placeholder.markdown(f"{full_answer}▌", unsafe_allow_html=True)
@@ -645,8 +618,10 @@ if page == "💬 Ask a Question":
                     st.session_state.eval_out = evaluate_answer(
                         question=st.session_state.question,
                         rag_answer=st.session_state.rag_answer,
-                        retrieved_contexts=st.session_state.contexts
+                        retrieved_contexts=st.session_state.contexts,
+                        trace=st.session_state.langfuse_trace,
                     )
+                langfuse_flush()
                 
                 st.rerun()
 
@@ -750,23 +725,9 @@ if page == "💬 Ask a Question":
                 # Set audio file path and reset generating flag
                 if "audio_file" in audio_container:
                     st.session_state.audio_file = audio_container["audio_file"]
-                    # Track successful audio generation
-                    if hasattr(st.session_state, 'query_id') and st.session_state.query_id:
-                        get_metrics_tracker().track_audio_generation(
-                            st.session_state.query_id,
-                            audio_duration_ms,
-                            success=True
-                        )
                 elif "error" in audio_container:
                     st.error(f"Audio generation failed: {audio_container['error']}")
-                    # Track failed audio generation
-                    if hasattr(st.session_state, 'query_id') and st.session_state.query_id:
-                        get_metrics_tracker().track_audio_generation(
-                            st.session_state.query_id,
-                            audio_duration_ms,
-                            success=False
-                        )
-                        track_error("audio_generation", audio_container['error'], st.session_state.query_id)
+                    track_error("audio_generation", audio_container['error'])
                     st.session_state.audio_generating = False
                     audio_progress.empty()
                     audio_status.empty()
@@ -807,132 +768,124 @@ elif page == "🕒 Evaluation History":
     st.subheader("📄 Full Evaluation Log")
     st.dataframe(df, use_container_width=True)
 
-# Page3: Metrics Dashboard (DISABLED/COMMENTED OUT)
-# else:
-#     st.title("📈 Performance Metrics Dashboard")
-#     st.markdown("Real-time system performance and usage statistics")
-#     
-#     # Get current session summary
-#     summary = get_session_summary()
-#     
-#     # Save metrics summary
-#     if st.button("💾 Save Metrics Summary"):
-#         save_metrics_summary()
-#         st.success("Metrics summary saved to logs/metrics_summary.json")
-#     
-#     # Overview metrics
-#     st.subheader("📊 Overview")
-#     col1, col2, col3, col4 = st.columns(4)
-#     
-#     with col1:
-#         st.metric("Total Queries", summary["total_queries"])
-#     with col2:
-#         st.metric("Total Errors", summary["total_errors"])
-#     with col3:
-#         st.metric("Error Rate", f"{summary['error_rate']:.1%}")
-#     with col4:
-#         st.metric("Retry Rate", f"{summary['retry_rate']:.1%}")
-#     
-#     st.divider()
-#     
-#     # Latency Statistics
-#     st.subheader("⚡ Latency Statistics")
-#     
-#     if summary["latency_stats"]:
-#         latency_data = []
-#         for operation, stats in summary["latency_stats"].items():
-#             latency_data.append({
-#                 "Operation": operation.replace("_", " ").title(),
-#                 "Count": stats["count"],
-#                 "Mean (ms)": f"{stats['mean_ms']:.1f}",
-#                 "Min (ms)": f"{stats['min_ms']:.1f}",
-#                 "Max (ms)": f"{stats['max_ms']:.1f}",
-#                 "P50 (ms)": f"{stats['p50_ms']:.1f}",
-#                 "P95 (ms)": f"{stats['p95_ms']:.1f}",
-#                 "P99 (ms)": f"{stats['p99_ms']:.1f}",
-#             })
-#         
-#         latency_df = pd.DataFrame(latency_data)
-#         st.dataframe(latency_df, use_container_width=True)
-#         
-#         # Latency chart
-#         st.markdown("#### Latency Distribution")
-#         chart_data = pd.DataFrame({
-#             "Operation": [op.replace("_", " ").title() for op in summary["latency_stats"].keys()],
-#             "Mean Latency (ms)": [stats["mean_ms"] for stats in summary["latency_stats"].values()],
-#             "P95 Latency (ms)": [stats["p95_ms"] for stats in summary["latency_stats"].values()],
-#         })
-#         st.bar_chart(chart_data.set_index("Operation"))
-#     else:
-#         st.info("No latency data available yet. Run some queries to see statistics.")
-#     
-#     st.divider()
-#     
-#     # API Usage
-#     st.subheader("🔌 API Usage & Cost Tracking")
-#     
-#     if summary["api_usage"]["calls"]:
-#         col1, col2 = st.columns(2)
-#         
-#         with col1:
-#             st.markdown("#### API Calls by Provider")
-#             calls_df = pd.DataFrame([
-#                 {"Provider": provider.title(), "Calls": count}
-#                 for provider, count in summary["api_usage"]["calls"].items()
-#             ])
-#             st.dataframe(calls_df, use_container_width=True)
-#         
-#         with col2:
-#             st.markdown("#### Token Usage by Provider")
-#             tokens_df = pd.DataFrame([
-#                 {"Provider": provider.title(), "Tokens": count}
-#                 for provider, count in summary["api_usage"]["tokens"].items()
-#             ])
-#             st.dataframe(tokens_df, use_container_width=True)
-#         
-#         # Cost estimation (rough approximation)
-#         st.markdown("#### 💰 Estimated Costs")
-#         st.caption("Based on approximate pricing (actual costs may vary)")
-#         
-#         total_tokens = sum(summary["api_usage"]["tokens"].values())
-#         # Rough cost estimates (update with actual pricing)
-#         groq_tokens = summary["api_usage"]["tokens"].get("groq", 0)
-#         google_tokens = summary["api_usage"]["tokens"].get("google", 0)
-#         
-#         # Groq is often free/very cheap, Gemini Flash is ~$0.075 per 1M tokens
-#         estimated_cost = (google_tokens / 1_000_000) * 0.075
-#         
-#         st.metric("Total Tokens", f"{total_tokens:,}")
-#         st.metric("Estimated Cost (USD)", f"${estimated_cost:.4f}")
-#     else:
-#         st.info("No API usage data available yet.")
-#     
-#     st.divider()
-#     
-#     # Raw metrics file
-#     st.subheader("📄 Raw Metrics Data")
-#     
-#     metrics_file = get_metrics_tracker().metrics_file
-#     if metrics_file.exists():
-#         metrics_df = pd.read_csv(metrics_file)
-#         
-#         st.markdown(f"**Total Events Logged:** {len(metrics_df)}")
-#         st.markdown(f"**Metrics File:** `{metrics_file}`")
-#         
-#         # Show recent events
-#         st.markdown("#### Recent Events (Last 20)")
-#         st.dataframe(
-#             metrics_df.tail(20).sort_values("timestamp", ascending=False),
-#             use_container_width=True
-#         )
-#         
-#         # Download button
-#         csv_data = metrics_df.to_csv(index=False)
-#         st.download_button(
-#             label="📥 Download Full Metrics CSV",
-#             data=csv_data,
-#             file_name="videorag_metrics.csv",
-#             mime="text/csv"
-#         )
-#     else:
-#         st.info("No metrics file found yet.")
+# ═══════════════════════════════════════════════════════════════════════════
+# Page 3: Observability Dashboard  (Langfuse + local eval log analytics)
+# ═══════════════════════════════════════════════════════════════════════════
+elif page == "📊 Observability":
+    st.title("📊 Observability Dashboard")
+    st.markdown("RAG pipeline monitoring powered by **Langfuse** • RAGAS quality metrics • latency & cost tracking")
+
+    # ── Langfuse link ──
+    langfuse_host = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
+    langfuse_configured = bool(os.getenv("LANGFUSE_PUBLIC_KEY"))
+
+    if langfuse_configured:
+        st.success(f"✅ Langfuse is connected • [Open Dashboard]({langfuse_host})")
+    else:
+        st.warning(
+            "⚠️ Langfuse keys not configured. "
+            "Set `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` in your `.env` or Streamlit Secrets "
+            "to enable full tracing.  The app runs normally without them."
+        )
+
+    st.divider()
+
+    # ── Local evaluation log analytics ──
+    if os.path.exists(LOG_FILE):
+        df = pd.read_csv(LOG_FILE)
+        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+
+        st.subheader("📈 Quality Metrics Over Time")
+
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Evaluations", len(df))
+        with col2:
+            avg_conf = df["confidence"].mean()
+            st.metric("Avg Confidence", f"{avg_conf:.3f}")
+        with col3:
+            avg_faith = df["faithfulness"].mean()
+            st.metric("Avg Faithfulness", f"{avg_faith:.3f}")
+        with col4:
+            fail_rate = (df["confidence"] < CONFIDENCE_THRESHOLD).mean()
+            st.metric("Failure Rate", f"{fail_rate:.1%}")
+
+        st.divider()
+
+        # Confidence trend line
+        st.subheader("📉 Confidence Trend")
+        if "timestamp" in df.columns and df["timestamp"].notna().any():
+            chart_df = df.set_index("timestamp")[["confidence", "faithfulness", "answer_relevancy"]].copy()
+            st.line_chart(chart_df)
+        else:
+            st.line_chart(df["confidence"])
+
+        st.divider()
+
+        # Metric distributions
+        st.subheader("📊 Metric Distributions")
+        metric_cols = ["context_precision", "context_recall", "answer_relevancy", "faithfulness", "confidence"]
+        avail_cols = [c for c in metric_cols if c in df.columns]
+        if avail_cols:
+            stats = df[avail_cols].describe().T[["mean", "50%", "min", "max"]]
+            stats.columns = ["Mean", "P50 (Median)", "Min", "Max"]
+            st.dataframe(stats.round(4), use_container_width=True)
+
+        st.divider()
+
+        # Anomaly detection: flag queries where confidence dropped > 2σ below mean
+        st.subheader("🚨 Anomaly Detection")
+        if len(df) >= 5:
+            mean_c = df["confidence"].mean()
+            std_c = df["confidence"].std()
+            anomaly_threshold = max(mean_c - 2 * std_c, 0)
+            anomalies = df[df["confidence"] < anomaly_threshold].copy()
+            if len(anomalies) > 0:
+                st.error(f"Found {len(anomalies)} anomalous queries (confidence < {anomaly_threshold:.3f})")
+                st.dataframe(
+                    anomalies[["timestamp", "question", "confidence", "faithfulness", "answer_relevancy"]].sort_values("confidence"),
+                    use_container_width=True,
+                )
+            else:
+                st.success("No anomalies detected — all queries within 2σ of mean confidence.")
+        else:
+            st.info("Need at least 5 evaluations for anomaly detection.")
+
+        st.divider()
+
+        # CSV download
+        st.subheader("📥 Export")
+        csv_data = df.to_csv(index=False)
+        st.download_button(
+            label="⬇️ Download Full Evaluation CSV",
+            data=csv_data,
+            file_name="videorag_evaluation_log.csv",
+            mime="text/csv",
+        )
+    else:
+        st.info("No evaluation logs yet. Ask a question and evaluate the answer to start collecting data.")
+
+    # ── What Langfuse tracks (informational) ──
+    st.divider()
+    with st.expander("ℹ️ What does Langfuse trace?"):
+        st.markdown("""
+**Every RAG request creates a trace with these spans:**
+
+| Span | Data Captured |
+|---|---|
+| `retrieval` | Query → MMR / MultiQuery / BM25 doc counts, dedup stats |
+| `cross_encoder_rerank` | Ranked doc list with scores, top-score, previews |
+| `answer_llm` | Full prompt & response, token counts, latency, cost |
+| `evaluation` | RAGAS metrics (precision, recall, faithfulness, relevancy), confidence |
+| `web_search` | Query rewrite, DDG results, scrape stats, web LLM answer |
+
+**Scores attached to every trace:**
+- `confidence`, `faithfulness`, `answer_relevancy`, `context_precision`, `context_recall`, `ragas_mean`
+
+**Dashboard features in Langfuse Cloud:**
+- p50 / p90 / p99 latency percentiles
+- Cost per request breakdown
+- Token consumption trends
+- Score distributions over time
+- Trace-level drill-down for debugging
+        """)

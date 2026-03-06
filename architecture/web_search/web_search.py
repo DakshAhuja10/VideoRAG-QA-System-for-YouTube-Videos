@@ -22,6 +22,12 @@ from langchain_groq import ChatGroq
 
 from config import LLMConfig
 
+# Observability
+from architecture.observability.langfuse_tracing import (
+    start_span, end_span, log_generation, timed_span,
+    flush as langfuse_flush, estimate_cost,
+)
+
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 _HEADERS = {
@@ -130,7 +136,7 @@ def _fetch_page_text(url: str, timeout: float = 12.0) -> str:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def web_search_answer(question: str) -> dict:
+def web_search_answer(question: str, trace=None) -> dict:
     """
     Search DuckDuckGo, scrape top results, and generate an answer via Groq.
 
@@ -143,18 +149,24 @@ def web_search_answer(question: str) -> dict:
       - "sources" : list[str]   — URLs that were used
       - "error"   : str | None  — error message if something failed
     """
+    ws_span = start_span(trace, name="web_search", input={"question": question})
+
     # 1. Rewrite the question into a better search query
     llm = None
     try:
         llm = ChatGroq(model=LLMConfig.ANSWER_MODEL, temperature=0)
-        search_query = llm.invoke(
-            _QUERY_REWRITE_PROMPT.format(question=question)
-        ).content.strip().strip('"').strip("'")
+        with timed_span(ws_span, name="query_rewrite") as (qr_span, _):
+            search_query = llm.invoke(
+                _QUERY_REWRITE_PROMPT.format(question=question)
+            ).content.strip().strip('"').strip("'")
+            end_span(qr_span, output={"search_query": search_query})
     except Exception:
         search_query = question  # fall back to raw question
 
     # 2. Search
-    results = _search_ddg(search_query)
+    with timed_span(ws_span, name="ddg_search", input={"query": search_query}) as (ddg_span, _):
+        results = _search_ddg(search_query)
+        end_span(ddg_span, output={"result_count": len(results)})
     if not results:
         return {
             "answer": None,
@@ -165,19 +177,22 @@ def web_search_answer(question: str) -> dict:
     # 3. Build source blocks — full scrape first, DDG snippet as fallback
     source_blocks = []
     scraped_urls = []
-    for r in results:
-        url  = r["href"]
-        body = r["body"]   # DDG snippet — always non-empty
+    with timed_span(ws_span, name="scrape_pages", input={"url_count": len(results)}) as (scrape_span, _):
+        for r in results:
+            url  = r["href"]
+            body = r["body"]   # DDG snippet — always non-empty
 
-        # Try full page scrape for richer content
-        page_text = _fetch_page_text(url)
-        text = page_text if page_text else body  # fallback to DDG snippet
+            # Try full page scrape for richer content
+            page_text = _fetch_page_text(url)
+            text = page_text if page_text else body  # fallback to DDG snippet
 
-        if text:
-            source_blocks.append(f"Source: {url}\n\n{text}")
-            scraped_urls.append(url)
+            if text:
+                source_blocks.append(f"Source: {url}\n\n{text}")
+                scraped_urls.append(url)
+        end_span(scrape_span, output={"scraped_count": len(scraped_urls)})
 
     if not source_blocks:
+        end_span(ws_span, output={"error": "no content scraped"}, level="WARNING")
         return {
             "answer": None,
             "sources": [r["href"] for r in results],
@@ -194,8 +209,13 @@ def web_search_answer(question: str) -> dict:
             llm = ChatGroq(model=LLMConfig.ANSWER_MODEL, temperature=0)
         raw_answer = llm.invoke(prompt).content
 
+        log_generation(
+            ws_span, name="web_answer_llm", model=LLMConfig.ANSWER_MODEL,
+            input=prompt[:500], output=raw_answer[:500],
+            metadata={"sources": scraped_urls},
+        )
+
         # Strip any trailing "Sources:" / "Source URLs:" block the LLM appends
-        # despite being told not to — the frontend renders sources separately.
         import re
         answer = re.split(
             r"\n\s*\*{0,2}source(?:s| urls?)?\*{0,2}\s*:?",
@@ -204,6 +224,10 @@ def web_search_answer(question: str) -> dict:
             flags=re.IGNORECASE,
         )[0].rstrip()
 
+        end_span(ws_span, output={"answer_len": len(answer), "sources": scraped_urls})
+        langfuse_flush()
         return {"answer": answer, "sources": scraped_urls, "error": None}
     except Exception as e:
+        end_span(ws_span, output={"error": str(e)}, level="ERROR")
+        langfuse_flush()
         return {"answer": None, "sources": scraped_urls, "error": str(e)}
